@@ -1,6 +1,7 @@
 import { initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { getPref } from "./utils/prefs";
 import {
   scoreSelected,
   analyzeSelected,
@@ -8,7 +9,6 @@ import {
   analyzeCollection,
 } from "./modules/dailypaper";
 
-// 定时任务 handle
 let _dailyTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function onStartup() {
@@ -19,8 +19,6 @@ async function onStartup() {
   ]);
   initLocale();
 
-  // 注册设置面板
-// 注册设置面板
   Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
     src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
@@ -28,14 +26,13 @@ async function onStartup() {
     image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
   });
 
-
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
   );
+
   scheduleDaily();
   addon.data.initialized = true;
 }
-
 
 async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   addon.data.ztoolkit = createZToolkit();
@@ -64,9 +61,7 @@ async function onNotify(
   type: string,
   ids: Array<string | number>,
   extraData: { [key: string]: any },
-) {
-  // 暂无需要监听的事件
-}
+) {}
 
 async function onPrefsEvent(type: string, data: { [key: string]: any }) {
   if (type === "load") registerPrefsScripts(data.window);
@@ -75,8 +70,6 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
 function onShortcuts(_type: string) {}
 
 function onDialogEvents(_type: string) {}
-
-// ── 右键菜单 ──────────────────────────────────────────────────────────────────
 
 function registerMenuItems(win: _ZoteroTypes.MainWindow) {
   ztoolkit.Menu.register("item", {
@@ -109,8 +102,6 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
   });
 }
 
-// ── 定时任务 ──────────────────────────────────────────────────────────────────
-
 function scheduleDaily() {
   const now = new Date();
   const next = new Date();
@@ -121,7 +112,7 @@ function scheduleDaily() {
     `[DailyPaper] Next auto-score in ${Math.round(delay / 60000)} min`,
   );
   _dailyTimer = setTimeout(async () => {
-    await scoreFeedItems();
+    if (getPref("autoScore")) await scoreFeedItems();
     scheduleDaily();
   }, delay);
 }

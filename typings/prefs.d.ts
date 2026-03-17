@@ -11,6 +11,7 @@ declare namespace _ZoteroTypes {
       "apiBase": string;
       "apiModel": string;
       "collection": string;
+      "autoScore": boolean;
       "scoreThreshold": number;
       "researchTopics": string;
     };
