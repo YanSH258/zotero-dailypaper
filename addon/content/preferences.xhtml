@@ -1,0 +1,99 @@
+<linkset>
+  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+</linkset>
+
+<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })">
+  <label><html:h2>Daily Paper Digest 设置</html:h2></label>
+
+  <!-- API 配置区 -->
+  <html:fieldset style="margin-bottom:12px;">
+    <html:legend style="font-weight:bold;">🔑 API 配置</html:legend>
+
+    <hbox align="center" style="margin-top:8px;">
+      <html:label style="width:120px;">API Key</html:label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-apiKey"
+        preference="extensions.dailypaper.apiKey"
+        style="flex:1;"
+        placeholder="sk-..."
+      />
+    </hbox>
+
+    <hbox align="center" style="margin-top:8px;">
+      <html:label style="width:120px;">API Base URL</html:label>
+      <html:input
+        type="text"
+        id="zotero-prefpane-__addonRef__-apiBase"
+        preference="extensions.dailypaper.apiBase"
+        style="flex:1;"
+        placeholder="https://api.deepseek.com/v1"
+      />
+    </hbox>
+
+    <hbox align="center" style="margin-top:8px;">
+      <html:label style="width:120px;">模型名称</html:label>
+      <html:input
+        type="text"
+        id="zotero-prefpane-__addonRef__-apiModel"
+        preference="extensions.dailypaper.apiModel"
+        style="flex:1;"
+        placeholder="deepseek-chat"
+      />
+    </hbox>
+
+    <hbox style="margin-top:8px;">
+      <html:button id="dailypaper-test-api">测试连接</html:button>
+      <html:span id="dailypaper-test-result" style="margin-left:10px;line-height:28px;color:#666;"></html:span>
+    </hbox>
+  </html:fieldset>
+
+  <!-- 评分配置区 -->
+  <html:fieldset style="margin-bottom:12px;">
+    <html:legend style="font-weight:bold;">⚙️ 评分配置</html:legend>
+
+    <hbox align="center" style="margin-top:8px;">
+      <html:label style="width:120px;">相关性阈值</html:label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-scoreThreshold"
+        preference="extensions.dailypaper.scoreThreshold"
+        min="0"
+        max="10"
+        style="width:60px;"
+      />
+      <html:span style="margin-left:8px;color:#666;">分（0-10，≥ 此分数标记为相关）</html:span>
+    </hbox>
+
+    <hbox align="center" style="margin-top:8px;">
+      <html:label style="width:120px;">目标 Collection</html:label>
+      <html:input
+        type="text"
+        id="zotero-prefpane-__addonRef__-collection"
+        preference="extensions.dailypaper.collection"
+        style="flex:1;"
+        placeholder="dailypaper"
+      />
+      <html:span style="margin-left:8px;color:#666;">高分文章自动移入此 Collection</html:span>
+    </hbox>
+  </html:fieldset>
+
+  <!-- 研究方向 -->
+  <html:fieldset>
+    <html:legend style="font-weight:bold;">🔬 研究方向（每行一条，用于评分）</html:legend>
+    <html:textarea
+      id="zotero-prefpane-__addonRef__-researchTopics"
+      rows="10"
+      style="width:100%;margin-top:8px;font-family:monospace;font-size:12px;box-sizing:border-box;"
+    />
+  </html:fieldset>
+
+</groupbox>
+
+<vbox style="margin-top:8px;">
+  <html:label
+    data-l10n-id="pref-help"
+    data-l10n-args='{"time":"__buildTime__","name":"__addonName__","version":"__buildVersion__"}'
+    style="color:#888;font-size:11px;"
+  />
+</vbox>
