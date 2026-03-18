@@ -2,7 +2,7 @@ import { config } from "../../package.json";
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
-const PROMPT_FULLTEXT = `你是一位经验丰富的化学/计算化学领域研究人员。
+const DEFAULT_PROMPT_FULLTEXT = `你是一位经验丰富的化学/计算化学领域研究人员。
 请对以下论文进行专业、深入的解读。全程中文，术语保留英文原文并附解释。严禁编造具体数字。
 
 ### 0. 摘要翻译
@@ -39,7 +39,7 @@ const PROMPT_FULLTEXT = `你是一位经验丰富的化学/计算化学领域研
 **a) 一句话核心思想**（≤20字）
 **b) 速记版 Pipeline**（3-5步，不用论文术语，直白具体）`;
 
-const PROMPT_ABSTRACT = `你是一位经验丰富的化学/计算化学领域研究人员。
+const DEFAULT_PROMPT_ABSTRACT = `你是一位经验丰富的化学/计算化学领域研究人员。
 当前论文【仅获取到摘要，未获取到全文】。
 ⚠️ 对于摘要中没有提及的内容，必须原封不动输出"因未获取到全文，摘要中无此信息"，绝对禁止依靠领域知识猜测或补全。
 
@@ -65,10 +65,28 @@ const PROMPT_ABSTRACT = `你是一位经验丰富的化学/计算化学领域研
 **a) 一句话核心思想**（基于摘要概括，≤20字）
 **b) 速记版 Pipeline**：因未获取到全文，摘要中无此信息。`;
 
+const DEFAULT_SCORE_PROMPT = `你是一位化学/计算化学领域的专业研究人员。
+请判断下面这篇论文与以下研究方向的相关性，给出 0-10 的整数评分：
+- 10：与研究方向高度相关，必读
+- 7-9：比较相关，值得关注
+- 4-6：有一定关联，可选读
+- 0-3：基本无关
+
+【研究方向】
+{{topics}}
+
+请只返回一个 JSON 对象，不要有任何其他文字：
+{"score": <0-10的整数>, "reason": "<一句话说明理由>"}`;
+
 // ── Pref helpers ──────────────────────────────────────────────────────────────
 
 function getPref<T>(key: string): T {
   return Zotero.Prefs.get(`${config.prefsPrefix}.${key}`, true) as T;
+}
+
+function getPromptPref(key: string, fallback: string): string {
+  const value = getPref<string>(key);
+  return value && value.trim() ? value : fallback;
 }
 
 async function findExistingLibraryItem(item: any): Promise<any | null> {
@@ -163,18 +181,12 @@ function buildScoreSystemPrompt(): string {
     .map((t) => `- ${t.trim()}`)
     .join("\n");
 
-  return `你是一位化学/计算化学领域的专业研究人员。
-请判断下面这篇论文与以下研究方向的相关性，给出 0-10 的整数评分：
-- 10：与研究方向高度相关，必读
-- 7-9：比较相关，值得关注
-- 4-6：有一定关联，可选读
-- 0-3：基本无关
+  const template = getPromptPref(
+    "scorePromptTemplate",
+    DEFAULT_SCORE_PROMPT,
+  );
 
-【研究方向】
-${topicList}
-
-请只返回一个 JSON 对象，不要有任何其他文字：
-{"score": <0-10的整数>, "reason": "<一句话说明理由>"}`;
+  return template.replace("{{topics}}", topicList);
 }
 
 export async function scoreRelevance(
@@ -379,10 +391,21 @@ export async function processItem(item: any, apiKey: string): Promise<void> {
   const hasFulltext = text.length > 500;
 
   const header = `【期刊】${journal}\n【标题】${title}\n【作者】${authors}\n\n`;
-  const systemPrompt = hasFulltext ? PROMPT_FULLTEXT : PROMPT_ABSTRACT;
+
+  const fulltextPrompt = getPromptPref(
+    "fulltextPromptTemplate",
+    DEFAULT_PROMPT_FULLTEXT,
+  );
+  const abstractPrompt = getPromptPref(
+    "abstractPromptTemplate",
+    DEFAULT_PROMPT_ABSTRACT,
+  );
+  
+  const systemPrompt = hasFulltext ? fulltextPrompt : abstractPrompt;
+  
   const body = hasFulltext
     ? `【论文正文（已提取关键段落）】\n${smartChunk(text)}`
-    : `【论文摘要】\n${text}`;
+    : `【论文摘要】\n${text}`;  
 
   let analysis: string;
   try {
