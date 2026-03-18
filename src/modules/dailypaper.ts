@@ -71,24 +71,32 @@ function getPref<T>(key: string): T {
   return Zotero.Prefs.get(`${config.prefsPrefix}.${key}`, true) as T;
 }
 
-async function existsInLibrary(item: any): Promise<boolean> {
-    const title = (item.getField("title") || "").toLowerCase().trim();
-    const doi = (item.getField("DOI") || "").toLowerCase().trim();
-    const userLibID = Zotero.Libraries.userLibraryID;
-  
-    const ids = await Zotero.Items.getAll(userLibID, false, false, true) as number[];
-    const all = await Zotero.Items.getAsync(ids) as any[];
-  
-    for (const it of all) {
-      if (!it.isRegularItem?.()) continue;
-      const d = (it.getField("DOI") || "").toLowerCase().trim();
-      const t = (it.getField("title") || "").toLowerCase().trim();
-      if (doi && d && doi === d) return true;
-      if (title && t && title === t) return true;
+async function findExistingLibraryItem(item: any): Promise<any | null> {
+  const title = (item.getField("title") || "").toLowerCase().trim();
+  const doi = (item.getField("DOI") || "").toLowerCase().trim();
+  const userLibID = Zotero.Libraries.userLibraryID;
+
+  const ids = await Zotero.Items.getAll(userLibID, false, false, true) as number[];
+  const all = await Zotero.Items.getAsync(ids) as any[];
+
+  for (const it of all) {
+    if (!it?.isRegularItem?.()) continue;
+
+    const existingDOI = (it.getField("DOI") || "").toLowerCase().trim();
+    const existingTitle = (it.getField("title") || "").toLowerCase().trim();
+
+    if (doi && existingDOI && doi === existingDOI) {
+      return it;
     }
-    return false;
+
+    if (title && existingTitle && title === existingTitle) {
+      return it;
+    }
   }
-  
+
+  return null;
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 async function callAPI(
@@ -188,108 +196,71 @@ export async function scoreRelevance(
 }
 
 // ── Collection ────────────────────────────────────────────────────────────────
-async function moveToCollection(item: any): Promise<void> {
-    const collectionName = getPref<string>("collection") || "dailypaper";
-    const userLibID = Zotero.Libraries.userLibraryID;
-  
-    ztoolkit.log(
-      `[DailyPaper] moveToCollection start: title="${item.getField?.("title")}", itemID=${item.id}, libraryID=${item.libraryID}, isFeedItem=${!!item.isFeedItem}`,
-    );
-  
-    let target = Zotero.Collections.getByLibrary(userLibID).find(
-      (c: any) => c.name.toLowerCase() === collectionName.toLowerCase(),
-    );
-  
-    if (!target) {
-      target = new Zotero.Collection({
-        libraryID: userLibID,
-        name: collectionName,
-      });
-      await target.saveTx();
-      ztoolkit.log(
-        `[DailyPaper] Created collection "${collectionName}" (id=${target.id})`,
-      );
-    }
-  
-    let targetItem = item;
-  
-    if (item.isFeedItem) {
-      if (await existsInLibrary(item)) {
-        ztoolkit.log(`[DailyPaper] Already in library, skipping: "${item.getField("title")}"`);
-        return;
-      }
+async function moveToCollection(item: any) {
+  const collectionName = getPref<string>("collection") || "dailypaper";
+  const collections = Zotero.Collections.getByLibrary(
+    Zotero.Libraries.userLibraryID,
+  );
+  const target = collections.find(
+    (c: any) => c.name.toLowerCase() === collectionName.toLowerCase(),
+  );
+
+  if (!target) {
+    throw new Error(`Collection not found: ${collectionName}`);
+  }
+
+  let targetItem = item;
+
+  if (item.isFeedItem) {
+    const existingItem = await findExistingLibraryItem(item);
+
+    if (existingItem) {
+      ztoolkit.log("Existing library item found, reuse it");
+      targetItem = existingItem;
+    } else {
+      ztoolkit.log("No existing library item found, importing from feed");
+
       try {
-        ztoolkit.log(
-          `[DailyPaper] Translating feed item to user library ${userLibID}...`,
-        );
-        const translated = await item.translate(userLibID, false);
-  
-        if (Array.isArray(translated)) {
-          ztoolkit.log(
-            `[DailyPaper] translate() returned array length=${translated.length}`,
-          );
-          targetItem = translated[0];
-        } else {
-          targetItem = translated;
-        }
-  
-        if (!targetItem) {
-            ztoolkit.log("[DailyPaper] translate() returned null/undefined, trying manual copy");
-            throw new Error("translate returned null");
-          }          
-  
-        ztoolkit.log(
-          `[DailyPaper] Feed translated successfully: newItemID=${targetItem.id}, newLibraryID=${targetItem.libraryID}`,
-        );
+        const translated = await item.translate(Zotero.Libraries.userLibraryID, false);
+        targetItem = Array.isArray(translated) ? translated[0] : translated;
       } catch (e) {
-        ztoolkit.log(`[DailyPaper] translate failed, trying manual copy: ${e}`);
-        try {
-          const newItem = new Zotero.Item("journalArticle");
-          newItem.libraryID = userLibID;
-          for (const field of ["title", "DOI", "abstractNote", "url", "date", "publicationTitle"]) {
-            try {
-              const val = item.getField(field);
-              if (val) newItem.setField(field, val);
-            } catch (_) {}
-          }
-          const creators = item.getCreators?.();
-          if (creators?.length) newItem.setCreators(creators);
-          await newItem.saveTx();
-          targetItem = newItem;
-  
-          const dpTags = item.getTags()
-            .filter((t: any) => t.tag.startsWith("dp-"))
-            .map((t: any) => t.tag);
-          for (const tag of dpTags) {
-            targetItem.addTag(tag);
-          }
-  
-          const scoreTag = dpTags.find((t: string) => t.startsWith("dp-score-"));
-          if (scoreTag) {
-            const score = scoreTag.replace("dp-score-", "");
-            targetItem.setField("extra", `DP-Score: ${score}/10`);
-          }
-  
-          await targetItem.saveTx();
-          ztoolkit.log(`[DailyPaper] Manual copy succeeded: newItemID=${targetItem.id}`);
-        } catch (e2) {
-          ztoolkit.log(`[DailyPaper] Manual copy also failed: ${e2}`);
-          return;
-        }
+        ztoolkit.log("Translate failed, fallback to manual copy", e);
+
+        const newItem = new Zotero.Item(item.itemType || "journalArticle");
+        newItem.libraryID = Zotero.Libraries.userLibraryID;
+
+        newItem.setField("title", item.getField("title") || "");
+        newItem.setField("DOI", item.getField("DOI") || "");
+        newItem.setField("abstractNote", item.getField("abstractNote") || "");
+        newItem.setField("url", item.getField("url") || "");
+        newItem.setField("date", item.getField("date") || "");
+        newItem.setField("publicationTitle", item.getField("publicationTitle") || "");
+
+        const creators = item.getCreators?.() || [];
+        newItem.setCreators(creators);
+
+        await newItem.saveTx();
+        targetItem = newItem;
       }
     }
-  
-    try {
-      targetItem.addToCollection(target.id);
-      await targetItem.saveTx();
-      ztoolkit.log(
-        `[DailyPaper] Item ${targetItem.id} added to collection "${collectionName}"`,
-      );
-    } catch (e) {
-      ztoolkit.log(`[DailyPaper] Failed to add item to collection: ${e}`);
-    }
-  }  
-  
+  }
+
+  const alreadyInCollection =
+    typeof targetItem.inCollection === "function"
+      ? targetItem.inCollection(target.id)
+      : (targetItem.getCollections?.() || []).includes(target.id);
+
+  if (!alreadyInCollection) {
+    targetItem.addToCollection(target.id);
+    await targetItem.saveTx();
+    ztoolkit.log(`Added item to collection: ${target.name}`);
+  } else {
+    ztoolkit.log(`Item already in collection: ${target.name}`);
+  }
+
+  return targetItem;
+}
+
 // ── Extract text ──────────────────────────────────────────────────────────────
 
 export async function extractText(item: any): Promise<string | null> {
