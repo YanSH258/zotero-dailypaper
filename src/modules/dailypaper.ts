@@ -170,6 +170,30 @@ function parseJSON(text: string): any {
   }
 }
 
+function hasScoreTag(item: any): boolean {
+  const tags = item.getTags?.() || [];
+  return tags.some((t: any) => {
+    const tag = typeof t === "string" ? t : t.tag;
+    return typeof tag === "string" && tag.startsWith("dp-score-");
+  });
+}
+
+function hasScoreInExtra(item: any): boolean {
+  const extra = (item.getField?.("extra") as string) || "";
+  return /DP-Score:\s*\d+\/10/i.test(extra);
+}
+
+function isAlreadyScored(item: any): boolean {
+  return hasScoreTag(item) || hasScoreInExtra(item);
+}
+
+function shouldScoreFeedItem(item: any): boolean {
+  if (!item?.isFeedItem) return false;
+  if (item.isRead) return false;
+  if (isAlreadyScored(item)) return false;
+  return true;
+}
+
 // ── Score ─────────────────────────────────────────────────────────────────────
 
 function buildScoreSystemPrompt(): string {
@@ -476,6 +500,11 @@ export async function scoreSelected(): Promise<void> {
     itemProgress.setText(title.slice(0, 60));
 
     try {
+      if (isAlreadyScored(item)) {
+        results.push(`SKIP 已评分  ${title.slice(0, 60)}`);
+        continue;
+      }
+
       const abstract = (item.getField("abstractNote") as string) || "";
       const score = await scoreRelevance(abstract || title, title, apiKey);
 
@@ -484,15 +513,14 @@ export async function scoreSelected(): Promise<void> {
         .filter((t: any) => t.tag.startsWith("dp-score-"))
         .forEach((t: any) => item.removeTag(t.tag));
       item.addTag(`dp-score-${score}`);
- 
-      // 写入 extra 字段
+
       const existingExtra = (item.getField("extra") as string) || "";
       const newExtra = existingExtra
-      .split("\n")
-      .filter((l) => !l.startsWith("DP-Score:"))
-      .concat(`DP-Score: ${score}/10`)
-      .join("\n")
-      .trim();
+        .split("\n")
+        .filter((l) => !l.startsWith("DP-Score:"))
+        .concat(`DP-Score: ${score}/10`)
+        .join("\n")
+        .trim();
       item.setField("extra", newExtra);
 
       if (score < threshold) {
@@ -506,11 +534,13 @@ export async function scoreSelected(): Promise<void> {
         results.push(`${score}分 ✓  ${title.slice(0, 60)}`);
         await moveToCollection(item);
       }
+
       await item.saveTx();
     } catch (e) {
       results.push(`ERR ✗  ${title.slice(0, 60)}`);
       ztoolkit.log(`[DailyPaper] Error scoring: ${e}`);
     }
+
     await new Promise((r) => setTimeout(r, 0));
   }
 
@@ -609,6 +639,12 @@ export async function scoreFeedItems(): Promise<void> {
       batch.map(async (item: any) => {
         try {
           const title = item.getField("title") as string;
+
+          if (!shouldScoreFeedItem(item)) {
+            ztoolkit.log(`[DailyPaper] Skip read/scored feed item: ${title}`);
+            return;
+          }
+
           const abstract = (item.getField("abstractNote") as string) || "";
           const score = await scoreRelevance(abstract || title, title, apiKey);
 
@@ -618,38 +654,39 @@ export async function scoreFeedItems(): Promise<void> {
             .forEach((t: any) => item.removeTag(t.tag));
           item.addTag(`dp-score-${score}`);
 
-                // 写入 extra 字段
           const existingExtra = (item.getField("extra") as string) || "";
           const newExtra = existingExtra
-          .split("\n")
-          .filter((l) => !l.startsWith("DP-Score:"))
-          .concat(`DP-Score: ${score}/10`)
-          .join("\n")
-          .trim();
+            .split("\n")
+            .filter((l) => !l.startsWith("DP-Score:"))
+            .concat(`DP-Score: ${score}/10`)
+            .join("\n")
+            .trim();
           item.setField("extra", newExtra);
 
           if (score < threshold) {
+            item.removeTag("dp-relevant");
             item.addTag("dp-irrelevant");
           } else {
+            item.removeTag("dp-irrelevant");
             item.addTag("dp-relevant");
             relevant++;
-          
+
             try {
               await moveToCollection(item);
-              moved++; 
+              moved++;
             } catch (e) {
               ztoolkit.log(
                 `[DailyPaper] moveToCollection failed: "${item.getField("title")}": ${e}`,
               );
             }
-          }          
+          }
 
           item.isRead = true;
           await item.saveTx();
         } catch (e) {
           ztoolkit.log(
             `[DailyPaper] Error scoring item "${item.getField("title")}" (id=${item.id}): ${e}`,
-        );
+          );
         }
         done++;
         itemProgress.setText(`${done}/${items.length}，${relevant} 篇相关`);
@@ -746,10 +783,7 @@ async function getFeedUnprocessedItems(): Promise<any[]> {
       )) as number[];
       const feedItems = (await Zotero.Items.getAsync(itemIDs)) as any[];
       for (const fi of feedItems) {
-        if (!fi.isFeedItem || fi.isRead) continue;
-        const tags = fi.getTags().map((t: any) => t.tag);
-        if (tags.includes("dp-irrelevant") || tags.includes("dp-relevant"))
-          continue;
+        if (!shouldScoreFeedItem(fi)) continue;
         results.push(fi);
       }
     } catch (e) {
