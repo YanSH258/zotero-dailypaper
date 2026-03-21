@@ -78,13 +78,40 @@
     </hbox>
   </html:fieldset>
 
-  <hbox align="center">
-    <checkbox
-      id="zotero-prefpane-dailypaper-autoScore"
-      preference="extensions.dailypaper.autoScore"
-      label="每天 8:00 自动评分 Feed 文章"
-    />
-  </hbox>
+  <!-- 自动评分配置 -->
+  <html:fieldset style="margin-bottom:12px;">
+    <html:legend style="font-weight:bold;">⏰ 自动评分</html:legend>
+    
+    <hbox align="center" style="margin-top:8px;">
+      <checkbox
+        id="zotero-prefpane-dailypaper-autoScore"
+        preference="extensions.dailypaper.autoScore"
+        label="启用每日自动评分"
+      />
+    </hbox>
+    
+    <hbox align="center" style="margin-top:8px;margin-left:24px;">
+      <html:label style="width:80px;">执行时间</html:label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-autoScoreHour"
+        preference="extensions.dailypaper.autoScoreHour"
+        min="0"
+        max="23"
+        style="width:50px;text-align:center;"
+      />
+      <html:label style="margin:0 4px;">:</html:label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-autoScoreMinute"
+        preference="extensions.dailypaper.autoScoreMinute"
+        min="0"
+        max="59"
+        style="width:50px;text-align:center;"
+      />
+      <html:span style="margin-left:8px;color:#666;">（24小时制，默认 8:00）</html:span>
+    </hbox>
+  </html:fieldset>
 
   <!-- 研究方向 -->
   <html:fieldset>
@@ -94,6 +121,41 @@
       rows="10"
       style="width:100%;margin-top:8px;font-family:monospace;font-size:12px;box-sizing:border-box;"
     />
+  </html:fieldset>
+
+  <!-- Prompt 配置区 -->
+  <html:fieldset style="margin-top:12px;">
+    <html:legend style="font-weight:bold;">💬 Prompt 配置（支持变量：${topics} 会自动替换为研究方向）</html:legend>
+    
+    <html:div style="margin-top:8px;">
+      <html:label style="font-weight:bold;">评分 Prompt 模板</html:label>
+      <html:textarea
+        id="zotero-prefpane-__addonRef__-scorePromptBase"
+        preference="extensions.dailypaper.scorePromptBase"
+        rows="8"
+        style="width:100%;margin-top:4px;font-family:monospace;font-size:11px;box-sizing:border-box;"
+      />
+    </html:div>
+
+    <html:div style="margin-top:12px;">
+      <html:label style="font-weight:bold;">全文解读 Prompt 模板</html:label>
+      <html:textarea
+        id="zotero-prefpane-__addonRef__-analyzePromptFulltext"
+        preference="extensions.dailypaper.analyzePromptFulltext"
+        rows="12"
+        style="width:100%;margin-top:4px;font-family:monospace;font-size:11px;box-sizing:border-box;"
+      />
+    </html:div>
+
+    <html:div style="margin-top:12px;">
+      <html:label style="font-weight:bold;">摘要解读 Prompt 模板</html:label>
+      <html:textarea
+        id="zotero-prefpane-__addonRef__-analyzePromptAbstract"
+        preference="extensions.dailypaper.analyzePromptAbstract"
+        rows="10"
+        style="width:100%;margin-top:4px;font-family:monospace;font-size:11px;box-sizing:border-box;"
+      />
+    </html:div>
   </html:fieldset>
 
 </groupbox>

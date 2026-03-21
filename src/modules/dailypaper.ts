@@ -1,70 +1,5 @@
 import { config } from "../../package.json";
 
-// ── Prompts ───────────────────────────────────────────────────────────────────
-
-const PROMPT_FULLTEXT = `你是一位经验丰富的化学/计算化学领域研究人员。
-请对以下论文进行专业、深入的解读。全程中文，术语保留英文原文并附解释。严禁编造具体数字。
-
-### 0. 摘要翻译
-将论文摘要原文翻译为中文，保持学术语言风格，不做删减。
----
-### 1. 方法动机
-**a) 提出动机**：作者为什么要提出这个方法？驱动力和研究背景。
-**b) 现有方法的痛点**：现有主流方法的具体局限性（不泛泛而谈）。
-**c) 核心假设与直觉**：用 2-3 句话概括本文的核心研究假设。
----
-### 2. 方法设计
-**a) 方法流程（Pipeline）**：输入 → 每个处理步骤（含技术细节）→ 输出。
-**b) 模块结构**：每个模块的功能，以及各模块如何协同。
-**c) 公式与算法解释**：通俗解释每个关键公式的含义和作用。
----
-### 3. 与其他方法对比
-**a) 本质区别**：最根本的不同在哪里？
-**b) 创新点**：核心贡献列表（编号）
-**c) 适用场景**：什么情况下更有优势？
-**d) 对比表格**（包含本文方法与至少2个对比方法，列出核心思路、优缺点）
----
-### 4. 实验表现
-**a) 实验设计**：数据集、基线、评估指标、实验设置
-**b) 关键结果**：最具代表性的数据和结论（数字具体）
-**c) 优势场景**：在哪些设置下优势最明显？
-**d) 局限性**：泛化能力、计算开销、数据依赖、适用范围限制
----
-### 5. 学习与应用
-**a) 开源情况与复现建议**
-**b) 实现细节**：超参数、数据预处理、训练技巧
-**c) 迁移潜力**：能否迁移到其他任务/领域？
----
-### 6. 总结
-**a) 一句话核心思想**（≤20字）
-**b) 速记版 Pipeline**（3-5步，不用论文术语，直白具体）`;
-
-const PROMPT_ABSTRACT = `你是一位经验丰富的化学/计算化学领域研究人员。
-当前论文【仅获取到摘要，未获取到全文】。
-⚠️ 对于摘要中没有提及的内容，必须原封不动输出"因未获取到全文，摘要中无此信息"，绝对禁止依靠领域知识猜测或补全。
-
-### 0. 摘要翻译
-将论文摘要原文翻译为中文，保持学术语言风格，不做删减。
----
-### 1. 方法动机
-仅基于摘要提取动机和背景（若没有则写"因未获取到全文，摘要中无此信息"）。
----
-### 2. 方法设计
-因未获取到全文，摘要中无此信息。
----
-### 3. 与其他方法对比
-因未获取到全文，摘要中无此信息。
----
-### 4. 实验表现
-仅基于摘要提取关键结果（若摘要中无具体数据，写"因未获取到全文，摘要中无此信息"）。
----
-### 5. 学习与应用
-因未获取到全文，摘要中无此信息。
----
-### 6. 总结
-**a) 一句话核心思想**（基于摘要概括，≤20字）
-**b) 速记版 Pipeline**：因未获取到全文，摘要中无此信息。`;
-
 // ── Pref helpers ──────────────────────────────────────────────────────────────
 
 function getPref<T>(key: string): T {
@@ -155,7 +90,9 @@ function buildScoreSystemPrompt(): string {
     .map((t) => `- ${t.trim()}`)
     .join("\n");
 
-  return `你是一位化学/计算化学领域的专业研究人员。
+  // 从配置中读取 prompt 模板
+  const promptTemplate = getPref<string>("scorePromptBase") || 
+    `你是一位化学/计算化学领域的专业研究人员。
 请判断下面这篇论文与以下研究方向的相关性，给出 0-10 的整数评分：
 - 10：与研究方向高度相关，必读
 - 7-9：比较相关，值得关注
@@ -167,6 +104,9 @@ ${topicList}
 
 请只返回一个 JSON 对象，不要有任何其他文字：
 {"score": <0-10的整数>, "reason": "<一句话说明理由>"}`;
+
+  // 替换变量 ${topics}
+  return promptTemplate.replace(/\$\{topics\}/g, topicList);
 }
 
 export async function scoreRelevance(
@@ -408,7 +348,12 @@ export async function processItem(item: any, apiKey: string): Promise<void> {
   const hasFulltext = text.length > 500;
 
   const header = `【期刊】${journal}\n【标题】${title}\n【作者】${authors}\n\n`;
-  const systemPrompt = hasFulltext ? PROMPT_FULLTEXT : PROMPT_ABSTRACT;
+  
+  // 从配置中读取 prompt 模板
+  const systemPrompt = hasFulltext 
+    ? (getPref<string>("analyzePromptFulltext") || getDefaultFulltextPrompt())
+    : (getPref<string>("analyzePromptAbstract") || getDefaultAbstractPrompt());
+    
   const body = hasFulltext
     ? `【论文正文（已提取关键段落）】\n${smartChunk(text)}`
     : `【论文摘要】\n${text}`;
@@ -442,6 +387,75 @@ ${markdownToHtml(analysis)}`;
 
   item.addTag("dp-done");
   await item.saveTx();
+}
+
+// ── Default prompts (fallback) ─────────────────────────────────────────────────
+
+function getDefaultFulltextPrompt(): string {
+  return `你是一位经验丰富的化学/计算化学领域研究人员。
+请对以下论文进行专业、深入的解读。全程中文，术语保留英文原文并附解释。严禁编造具体数字。
+
+### 0. 摘要翻译
+将论文摘要原文翻译为中文，保持学术语言风格，不做删减。
+---
+### 1. 方法动机
+**a) 提出动机**：作者为什么要提出这个方法？驱动力和研究背景。
+**b) 现有方法的痛点**：现有主流方法的具体局限性（不泛泛而谈）。
+**c) 核心假设与直觉**：用 2-3 句话概括本文的核心研究假设。
+---
+### 2. 方法设计
+**a) 方法流程（Pipeline）**：输入 → 每个处理步骤（含技术细节）→ 输出。
+**b) 模块结构**：每个模块的功能，以及各模块如何协同。
+**c) 公式与算法解释**：通俗解释每个关键公式的含义和作用。
+---
+### 3. 与其他方法对比
+**a) 本质区别**：最根本的不同在哪里？
+**b) 创新点**：核心贡献列表（编号）
+**c) 适用场景**：什么情况下更有优势？
+**d) 对比表格**（包含本文方法与至少2个对比方法，列出核心思路、优缺点）
+---
+### 4. 实验表现
+**a) 实验设计**：数据集、基线、评估指标、实验设置
+**b) 关键结果**：最具代表性的数据和结论（数字具体）
+**c) 优势场景**：在哪些设置下优势最明显？
+**d) 局限性**：泛化能力、计算开销、数据依赖、适用范围限制
+---
+### 5. 学习与应用
+**a) 开源情况与复现建议**
+**b) 实现细节**：超参数、数据预处理、训练技巧
+**c) 迁移潜力**：能否迁移到其他任务/领域？
+---
+### 6. 总结
+**a) 一句话核心思想**（≤20字）
+**b) 速记版 Pipeline**（3-5步，不用论文术语，直白具体）`;
+}
+
+function getDefaultAbstractPrompt(): string {
+  return `你是一位经验丰富的化学/计算化学领域研究人员。
+当前论文【仅获取到摘要，未获取到全文】。
+⚠️ 对于摘要中没有提及的内容，必须原封不动输出"因未获取到全文，摘要中无此信息"，绝对禁止依靠领域知识猜测或补全。
+
+### 0. 摘要翻译
+将论文摘要原文翻译为中文，保持学术语言风格，不做删减。
+---
+### 1. 方法动机
+仅基于摘要提取动机和背景（若没有则写"因未获取到全文，摘要中无此信息"）。
+---
+### 2. 方法设计
+因未获取到全文，摘要中无此信息。
+---
+### 3. 与其他方法对比
+因未获取到全文，摘要中无此信息。
+---
+### 4. 实验表现
+仅基于摘要提取关键结果（若摘要中无具体数据，写"因未获取到全文，摘要中无此信息"）。
+---
+### 5. 学习与应用
+因未获取到全文，摘要中无此信息。
+---
+### 6. 总结
+**a) 一句话核心思想**（基于摘要概括，≤20字）
+**b) 速记版 Pipeline**：因未获取到全文，摘要中无此信息。`;
 }
 
 // ── Menu actions ──────────────────────────────────────────────────────────────
@@ -485,34 +499,48 @@ export async function scoreSelected(): Promise<void> {
       const abstract = (item.getField("abstractNote") as string) || "";
       const score = await scoreRelevance(abstract || title, title, apiKey);
 
-      item
+      // 移除旧的评分标签
+      const oldScoreTags = item
         .getTags()
-        .filter((t: any) => t.tag.startsWith("dp-score-"))
-        .forEach((t: any) => item.removeTag(t.tag));
+        .filter((t: any) => t.tag.startsWith("dp-score-"));
+      for (const t of oldScoreTags) {
+        item.removeTag(t.tag);
+      }
+      
+      // 添加新评分标签
       item.addTag(`dp-score-${score}`);
  
       // 写入 extra 字段
       const existingExtra = (item.getField("extra") as string) || "";
       const newExtra = existingExtra
-      .split("\n")
-      .filter((l) => !l.startsWith("DP-Score:"))
-      .concat(`DP-Score: ${score}/10`)
-      .join("\n")
-      .trim();
+        .split("\n")
+        .filter((l) => !l.startsWith("DP-Score:"))
+        .concat(`DP-Score: ${score}/10`)
+        .join("\n")
+        .trim();
       item.setField("extra", newExtra);
+      
+      // 先保存标签和extra字段
+      await item.saveTx();
 
+      // 添加相关标签并再次保存
       if (score < threshold) {
         item.removeTag("dp-relevant");
         item.addTag("dp-irrelevant");
+        await item.saveTx();
         results.push(`${score}分 ✗  ${title.slice(0, 60)}`);
       } else {
         item.removeTag("dp-irrelevant");
         item.addTag("dp-relevant");
+        await item.saveTx();
         relevant++;
         results.push(`${score}分 ✓  ${title.slice(0, 60)}`);
         await moveToCollection(item);
       }
-      await item.saveTx();
+      
+      ztoolkit.log(
+        `[DailyPaper] Successfully scored item "${title}" with score ${score}, tags: ${item.getTags().map((t: any) => t.tag).join(", ")}`,
+      );
     } catch (e) {
       results.push(`ERR ✗  ${title.slice(0, 60)}`);
       ztoolkit.log(`[DailyPaper] Error scoring: ${e}`);
@@ -618,26 +646,39 @@ export async function scoreFeedItems(): Promise<void> {
           const abstract = (item.getField("abstractNote") as string) || "";
           const score = await scoreRelevance(abstract || title, title, apiKey);
 
-          item
+          // 移除旧的评分标签
+          const oldScoreTags = item
             .getTags()
-            .filter((t: any) => t.tag.startsWith("dp-score-"))
-            .forEach((t: any) => item.removeTag(t.tag));
+            .filter((t: any) => t.tag.startsWith("dp-score-"));
+          for (const t of oldScoreTags) {
+            item.removeTag(t.tag);
+          }
+          
+          // 添加新评分标签并立即保存
           item.addTag(`dp-score-${score}`);
-
-                // 写入 extra 字段
+          
+          // 写入 extra 字段
           const existingExtra = (item.getField("extra") as string) || "";
           const newExtra = existingExtra
-          .split("\n")
-          .filter((l) => !l.startsWith("DP-Score:"))
-          .concat(`DP-Score: ${score}/10`)
-          .join("\n")
-          .trim();
+            .split("\n")
+            .filter((l) => !l.startsWith("DP-Score:"))
+            .concat(`DP-Score: ${score}/10`)
+            .join("\n")
+            .trim();
           item.setField("extra", newExtra);
+          
+          // 先保存标签和extra字段
+          await item.saveTx();
 
+          // 添加相关标签并再次保存
           if (score < threshold) {
+            item.removeTag("dp-relevant");
             item.addTag("dp-irrelevant");
+            await item.saveTx();
           } else {
+            item.removeTag("dp-irrelevant");
             item.addTag("dp-relevant");
+            await item.saveTx();
             relevant++;
           
             try {
@@ -649,13 +690,18 @@ export async function scoreFeedItems(): Promise<void> {
               );
             }
           }          
-
+          
+          // 标记为已读
           item.isRead = true;
           await item.saveTx();
+          
+          ztoolkit.log(
+            `[DailyPaper] Successfully scored item "${title}" with score ${score}, tags: ${item.getTags().map((t: any) => t.tag).join(", ")}`,
+          );
         } catch (e) {
           ztoolkit.log(
             `[DailyPaper] Error scoring item "${item.getField("title")}" (id=${item.id}): ${e}`,
-        );
+          );
         }
         done++;
         itemProgress.setText(`${done}/${items.length}，${relevant} 篇相关`);

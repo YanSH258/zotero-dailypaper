@@ -13,4 +13,4 @@ tsconfig.tsbuildinfo
 .env
 .scaffold
 build
-logs
+logs.vscode/

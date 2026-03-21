@@ -12,8 +12,13 @@ declare namespace _ZoteroTypes {
       "apiModel": string;
       "collection": string;
       "autoScore": boolean;
+      "autoScoreHour": number;
+      "autoScoreMinute": number;
       "scoreThreshold": number;
       "researchTopics": string;
+      "scorePromptBase": string;
+      "analyzePromptFulltext": string;
+      "analyzePromptAbstract": string;
     };
   }
 }
