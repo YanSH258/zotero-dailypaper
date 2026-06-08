@@ -125,21 +125,6 @@ DP-Keywords: MLIP; molecular dynamics; interatomic potential
 
 支持 DeepSeek、OpenAI，以及其他兼容 OpenAI Chat Completions API 格式的服务。不同服务的 Base URL 和模型名需要按服务商说明填写。
 
-## 开发
-
-```bash
-npm install
-npm run start
-```
-
-发布前检查：
-
-```bash
-npm run typecheck
-npm run lint:check
-npm run build
-```
-
 ## 反馈
 
 如遇到问题或有功能建议，请提交 [Issue](https://github.com/YanSH258/zotero-dailypaper/issues)。
