@@ -2,168 +2,275 @@
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
 </linkset>
 
-<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })">
+<groupbox
+  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
+>
   <label><html:h2>Daily Paper Digest 设置</html:h2></label>
 
   <!-- API 配置区 -->
-  <html:fieldset style="margin-bottom:12px;">
-    <html:legend style="font-weight:bold;">🔑 API 配置</html:legend>
+  <html:fieldset style="margin-bottom: 12px">
+    <html:legend style="font-weight: bold">🔑 API 配置</html:legend>
 
-    <hbox align="center" style="margin-top:8px;">
-      <html:label style="width:120px;">API Key</html:label>
+    <hbox align="center" style="margin-top: 8px">
+      <html:label style="width: 120px">API Key</html:label>
       <html:input
         type="password"
         id="zotero-prefpane-__addonRef__-apiKey"
         preference="extensions.dailypaper.apiKey"
-        style="flex:1;"
+        style="flex: 1"
         placeholder="sk-..."
       />
     </hbox>
 
-    <hbox align="center" style="margin-top:8px;">
-      <html:label style="width:120px;">API Base URL</html:label>
+    <hbox align="center" style="margin-top: 8px">
+      <html:label style="width: 120px">API Base URL</html:label>
       <html:input
         type="text"
         id="zotero-prefpane-__addonRef__-apiBase"
         preference="extensions.dailypaper.apiBase"
-        style="flex:1;"
+        style="flex: 1"
         placeholder="https://api.deepseek.com/v1"
       />
     </hbox>
 
-    <hbox align="center" style="margin-top:8px;">
-      <html:label style="width:120px;">模型名称</html:label>
+    <hbox align="center" style="margin-top: 8px">
+      <html:label style="width: 120px">模型名称</html:label>
       <html:input
         type="text"
         id="zotero-prefpane-__addonRef__-apiModel"
         preference="extensions.dailypaper.apiModel"
-        style="flex:1;"
+        style="flex: 1"
         placeholder="deepseek-chat"
       />
     </hbox>
 
-    <hbox style="margin-top:8px;">
+    <hbox style="margin-top: 8px">
       <html:button id="dailypaper-test-api">测试连接</html:button>
-      <html:span id="dailypaper-test-result" style="margin-left:10px;line-height:28px;color:#666;"></html:span>
+      <html:span
+        id="dailypaper-test-result"
+        style="margin-left: 10px; line-height: 28px; color: #666"
+      ></html:span>
     </hbox>
   </html:fieldset>
 
   <!-- 评分配置区 -->
-  <html:fieldset style="margin-bottom:12px;">
-    <html:legend style="font-weight:bold;">⚙️ 评分配置</html:legend>
+  <html:fieldset style="margin-bottom: 12px">
+    <html:legend style="font-weight: bold">⚙️ 评分配置</html:legend>
 
-    <hbox align="center" style="margin-top:8px;">
-      <html:label style="width:120px;">相关性阈值</html:label>
+    <hbox align="center" style="margin-top: 8px">
+      <html:label style="width: 120px">相关性阈值</html:label>
       <html:input
         type="number"
         id="zotero-prefpane-__addonRef__-scoreThreshold"
         preference="extensions.dailypaper.scoreThreshold"
         min="0"
         max="10"
-        style="width:60px;"
+        style="width: 60px"
       />
-      <html:span style="margin-left:8px;color:#666;">分（0-10，≥ 此分数标记为相关）</html:span>
+      <html:span style="margin-left: 8px; color: #666"
+        >分（0-10，≥ 此分数标记为相关）</html:span
+      >
     </hbox>
 
-    <hbox align="center" style="margin-top:8px;">
-      <html:label style="width:120px;">目标 Collection</html:label>
+    <hbox align="center" style="margin-top: 8px">
+      <html:label style="width: 120px">评分并发数</html:label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-scoreConcurrency"
+        preference="extensions.dailypaper.scoreConcurrency"
+        min="1"
+        max="10"
+        style="width: 60px"
+      />
+      <html:span style="margin-left: 8px; color: #666"
+        >同时处理的文章数（1-10，默认 5）</html:span
+      >
+    </hbox>
+
+    <hbox align="center" style="margin-top: 8px">
+      <html:label style="width: 120px">目标 Collection</html:label>
       <html:input
         type="text"
         id="zotero-prefpane-__addonRef__-collection"
         preference="extensions.dailypaper.collection"
-        style="flex:1;"
+        style="flex: 1"
         placeholder="dailypaper"
       />
-      <html:span style="margin-left:8px;color:#666;">高分文章自动移入此 Collection</html:span>
+      <html:span style="margin-left: 8px; color: #666"
+        >高分文章自动移入此 Collection</html:span
+      >
+    </hbox>
+
+    <hbox align="center" style="margin-top: 8px">
+      <checkbox
+        id="zotero-prefpane-dailypaper-autoClassify"
+        preference="extensions.dailypaper.autoClassify"
+        label="启用高分文章自动关键词与细分类"
+      />
+      <html:span style="margin-left: 8px; color: #666"
+        >高分文章会加入目标 Collection 下的子分类</html:span
+      >
     </hbox>
   </html:fieldset>
 
   <!-- 自动评分配置 -->
-  <html:fieldset style="margin-bottom:12px;">
-    <html:legend style="font-weight:bold;">⏰ 自动评分</html:legend>
-    
-    <hbox align="center" style="margin-top:8px;">
+  <html:fieldset style="margin-bottom: 12px">
+    <html:legend style="font-weight: bold">⏰ 自动评分</html:legend>
+
+    <hbox align="center" style="margin-top: 8px">
       <checkbox
         id="zotero-prefpane-dailypaper-autoScore"
         preference="extensions.dailypaper.autoScore"
         label="启用每日自动评分"
       />
     </hbox>
-    
-    <hbox align="center" style="margin-top:8px;margin-left:24px;">
-      <html:label style="width:80px;">执行时间</html:label>
+
+    <hbox align="center" style="margin-top: 8px; margin-left: 24px">
+      <html:label style="width: 80px">执行时间</html:label>
       <html:input
         type="number"
         id="zotero-prefpane-__addonRef__-autoScoreHour"
         preference="extensions.dailypaper.autoScoreHour"
         min="0"
         max="23"
-        style="width:50px;text-align:center;"
+        style="width: 50px; text-align: center"
       />
-      <html:label style="margin:0 4px;">:</html:label>
+      <html:label style="margin: 0 4px">:</html:label>
       <html:input
         type="number"
         id="zotero-prefpane-__addonRef__-autoScoreMinute"
         preference="extensions.dailypaper.autoScoreMinute"
         min="0"
         max="59"
-        style="width:50px;text-align:center;"
+        style="width: 50px; text-align: center"
       />
-      <html:span style="margin-left:8px;color:#666;">（24小时制，默认 8:00）</html:span>
+      <html:span style="margin-left: 8px; color: #666"
+        >（24小时制，默认 8:00）</html:span
+      >
     </hbox>
   </html:fieldset>
 
   <!-- 研究方向 -->
   <html:fieldset>
-    <html:legend style="font-weight:bold;">🔬 研究方向（每行一条，用于评分）</html:legend>
+    <html:legend style="font-weight: bold"
+      >🔬 研究方向（每行一条，用于评分）</html:legend
+    >
     <html:textarea
       id="zotero-prefpane-__addonRef__-researchTopics"
       rows="10"
-      style="width:100%;margin-top:8px;font-family:monospace;font-size:12px;box-sizing:border-box;"
+      style="
+        width: 100%;
+        margin-top: 8px;
+        font-family: monospace;
+        font-size: 12px;
+        box-sizing: border-box;
+      "
+    />
+  </html:fieldset>
+
+  <html:fieldset style="margin-top: 12px">
+    <html:legend style="font-weight: bold"
+      >🏷️ 分类同义词表（可选：标准分类 = 同义词1, 同义词2）</html:legend
+    >
+    <html:label style="color: #666; font-size: 12px"
+      >留空时只使用当前 Collection 的已有子文件夹作为分类候选。</html:label
+    >
+    <html:textarea
+      id="zotero-prefpane-__addonRef__-categorySynonyms"
+      placeholder="标准分类 = 同义词1, 同义词2"
+      rows="8"
+      style="
+        width: 100%;
+        margin-top: 8px;
+        font-family: monospace;
+        font-size: 12px;
+        box-sizing: border-box;
+      "
     />
   </html:fieldset>
 
   <!-- Prompt 配置区 -->
-  <html:fieldset style="margin-top:12px;">
-    <html:legend style="font-weight:bold;">💬 Prompt 配置（支持变量：${topics} 会自动替换为研究方向）</html:legend>
-    
-    <html:div style="margin-top:8px;">
-      <html:label style="font-weight:bold;">评分 Prompt 模板</html:label>
+  <html:fieldset style="margin-top: 12px">
+    <html:legend style="font-weight: bold"
+      >💬 Prompt 配置（支持变量：${topics} 会自动替换为研究方向）</html:legend
+    >
+
+    <html:details style="margin-top: 8px">
+      <html:summary style="font-weight: bold">评分 Prompt 模板</html:summary>
       <html:textarea
         id="zotero-prefpane-__addonRef__-scorePromptBase"
         preference="extensions.dailypaper.scorePromptBase"
         rows="8"
-        style="width:100%;margin-top:4px;font-family:monospace;font-size:11px;box-sizing:border-box;"
+        style="
+          width: 100%;
+          margin-top: 4px;
+          font-family: monospace;
+          font-size: 11px;
+          box-sizing: border-box;
+        "
       />
-    </html:div>
+    </html:details>
 
-    <html:div style="margin-top:12px;">
-      <html:label style="font-weight:bold;">全文解读 Prompt 模板</html:label>
+    <html:details style="margin-top: 12px">
+      <html:summary style="font-weight: bold"
+        >关键词与细分类 Prompt 模板</html:summary
+      >
+      <html:textarea
+        id="zotero-prefpane-__addonRef__-classifyPromptBase"
+        preference="extensions.dailypaper.classifyPromptBase"
+        rows="8"
+        style="
+          width: 100%;
+          margin-top: 4px;
+          font-family: monospace;
+          font-size: 11px;
+          box-sizing: border-box;
+        "
+      />
+    </html:details>
+
+    <html:details style="margin-top: 12px">
+      <html:summary style="font-weight: bold"
+        >全文解读 Prompt 模板</html:summary
+      >
       <html:textarea
         id="zotero-prefpane-__addonRef__-analyzePromptFulltext"
         preference="extensions.dailypaper.analyzePromptFulltext"
         rows="12"
-        style="width:100%;margin-top:4px;font-family:monospace;font-size:11px;box-sizing:border-box;"
+        style="
+          width: 100%;
+          margin-top: 4px;
+          font-family: monospace;
+          font-size: 11px;
+          box-sizing: border-box;
+        "
       />
-    </html:div>
+    </html:details>
 
-    <html:div style="margin-top:12px;">
-      <html:label style="font-weight:bold;">摘要解读 Prompt 模板</html:label>
+    <html:details style="margin-top: 12px">
+      <html:summary style="font-weight: bold"
+        >摘要解读 Prompt 模板</html:summary
+      >
       <html:textarea
         id="zotero-prefpane-__addonRef__-analyzePromptAbstract"
         preference="extensions.dailypaper.analyzePromptAbstract"
         rows="10"
-        style="width:100%;margin-top:4px;font-family:monospace;font-size:11px;box-sizing:border-box;"
+        style="
+          width: 100%;
+          margin-top: 4px;
+          font-family: monospace;
+          font-size: 11px;
+          box-sizing: border-box;
+        "
       />
-    </html:div>
+    </html:details>
   </html:fieldset>
-
 </groupbox>
 
-<vbox style="margin-top:8px;">
+<vbox style="margin-top: 8px">
   <html:label
     data-l10n-id="pref-help"
     data-l10n-args='{"time":"__buildTime__","name":"__addonName__","version":"__buildVersion__"}'
-    style="color:#888;font-size:11px;"
+    style="color: #888; font-size: 11px"
   />
 </vbox>

@@ -7,23 +7,28 @@ function getPref<T>(key: string): T {
 }
 
 async function existsInLibrary(item: any): Promise<boolean> {
-    const title = (item.getField("title") || "").toLowerCase().trim();
-    const doi = (item.getField("DOI") || "").toLowerCase().trim();
-    const userLibID = Zotero.Libraries.userLibraryID;
-  
-    const ids = await Zotero.Items.getAll(userLibID, false, false, true) as number[];
-    const all = await Zotero.Items.getAsync(ids) as any[];
-  
-    for (const it of all) {
-      if (!it.isRegularItem?.()) continue;
-      const d = (it.getField("DOI") || "").toLowerCase().trim();
-      const t = (it.getField("title") || "").toLowerCase().trim();
-      if (doi && d && doi === d) return true;
-      if (title && t && title === t) return true;
-    }
-    return false;
+  const title = (item.getField("title") || "").toLowerCase().trim();
+  const doi = (item.getField("DOI") || "").toLowerCase().trim();
+  const userLibID = Zotero.Libraries.userLibraryID;
+
+  const ids = (await Zotero.Items.getAll(
+    userLibID,
+    false,
+    false,
+    true,
+  )) as number[];
+  const all = (await Zotero.Items.getAsync(ids)) as any[];
+
+  for (const it of all) {
+    if (!it.isRegularItem?.()) continue;
+    const d = (it.getField("DOI") || "").toLowerCase().trim();
+    const t = (it.getField("title") || "").toLowerCase().trim();
+    if (doi && d && doi === d) return true;
+    if (title && t && title === t) return true;
   }
-  
+  return false;
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 async function callAPI(
@@ -32,8 +37,9 @@ async function callAPI(
   userPrompt: string,
   maxTokens: number,
 ): Promise<string> {
-  const apiBase =
-    (getPref<string>("apiBase") || "https://api.deepseek.com/v1").replace(/\/$/, "");
+  const apiBase = (
+    getPref<string>("apiBase") || "https://api.deepseek.com/v1"
+  ).replace(/\/$/, "");
   const apiModel = getPref<string>("apiModel") || "deepseek-chat";
 
   const response = await fetch(`${apiBase}/chat/completions`, {
@@ -81,9 +87,15 @@ function parseJSON(text: string): any {
 
 // ── Score ─────────────────────────────────────────────────────────────────────
 
+type ScoreResult = {
+  score: number;
+  reason: string;
+};
+
 function buildScoreSystemPrompt(): string {
   const topics =
-    getPref<string>("researchTopics") || "机器学习势函数/MLIP\n分子动力学/MD模拟";
+    getPref<string>("researchTopics") ||
+    "机器学习势函数/MLIP\n分子动力学/MD模拟";
   const topicList = topics
     .split("\n")
     .filter(Boolean)
@@ -91,7 +103,8 @@ function buildScoreSystemPrompt(): string {
     .join("\n");
 
   // 从配置中读取 prompt 模板
-  const promptTemplate = getPref<string>("scorePromptBase") || 
+  const promptTemplate =
+    getPref<string>("scorePromptBase") ||
     `你是一位化学/计算化学领域的专业研究人员。
 请判断下面这篇论文与以下研究方向的相关性，给出 0-10 的整数评分：
 - 10：与研究方向高度相关，必读
@@ -113,33 +126,360 @@ export async function scoreRelevance(
   text: string,
   title: string,
   apiKey: string,
-): Promise<number> {
+): Promise<ScoreResult> {
   const systemPrompt = buildScoreSystemPrompt();
   const userPrompt = `【论文标题】\n${title}\n\n【论文摘要/内容节选】\n${text.slice(0, 3000)}`;
   try {
     const resp = await callAPI(apiKey, systemPrompt, userPrompt, 200);
     const data = parseJSON(resp);
     const score = parseInt(data.score);
-    return isNaN(score) ? 0 : Math.min(10, Math.max(0, score));
+    return {
+      score: isNaN(score) ? 0 : Math.min(10, Math.max(0, score)),
+      reason: normalizeReason(data.reason),
+    };
   } catch (e) {
     ztoolkit.log(`[DailyPaper] Scoring failed: ${e}`);
-    return 0;
+    return {
+      score: 0,
+      reason: "评分失败",
+    };
   }
 }
 
-// ── Collection ────────────────────────────────────────────────────────────────
-async function moveToCollection(item: any): Promise<void> {
-    const collectionName = getPref<string>("collection") || "dailypaper";
-    const userLibID = Zotero.Libraries.userLibraryID;
-  
-    ztoolkit.log(
-      `[DailyPaper] moveToCollection start: title="${item.getField?.("title")}", itemID=${item.id}, libraryID=${item.libraryID}, isFeedItem=${!!item.isFeedItem}`,
+function normalizeReason(reason: unknown): string {
+  return String(reason || "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+// ── Classification ────────────────────────────────────────────────────────────
+
+type PaperClassification = {
+  category: string;
+  keywords: string[];
+  sourceKeywords: string[];
+};
+
+type CategoryRule = {
+  canonical: string;
+  aliases: string[];
+};
+
+const LEGACY_DEFAULT_CATEGORY_SYNONYMS =
+  "机器学习势函数/MLIP = MLIP, ML势函数, 机器学习势函数, neural network potential, machine learning potential, MACE, NequIP, DeePMD\n分子动力学/MD = molecular dynamics, MD simulation, AIMD\nDFT/第一性原理 = DFT, first-principles, VASP, Quantum ESPRESSO\nMOF与多孔材料 = MOF, metal-organic framework, porous materials\n催化与反应机理 = catalysis, reaction mechanism, electrocatalysis, photocatalysis, transition state\nAI for Science = GNN, Transformer, diffusion model, foundation model\n表面与界面 = surface, interface, adsorption\n纳米材料 = nanomaterial, nanoparticle";
+
+function buildClassifySystemPrompt(): string {
+  const topics =
+    getPref<string>("researchTopics") ||
+    "机器学习势函数/MLIP\n分子动力学/MD模拟";
+  const topicList = topics
+    .split("\n")
+    .filter(Boolean)
+    .map((t) => `- ${t.trim()}`)
+    .join("\n");
+  const promptTemplate =
+    getPref<string>("classifyPromptBase") ||
+    `你是一位文献管理助手。
+请根据论文标题和摘要，为论文自动选择一个最合适的细分类，并提取 3-5 个关键词。
+
+【研究方向，仅作语义参考，不作为候选分类】
+${topicList}
+
+要求：
+- category 必须从用户给定的候选分类名中选择最接近的一类；没有合适项时返回"未分类"
+- 如果论文自带关键词有价值，keywords 优先保留其中最核心的词，再补充明显缺失的词
+- keywords 使用论文的核心方法、材料体系、任务或应用场景
+- keywords 最多 5 个
+- 不要输出空泛词，如 "研究"、"论文"、"方法"
+- 只返回一个 JSON 对象，不要有任何其他文字：
+{"category":"<细分类名>","keywords":["<关键词1>","<关键词2>","<关键词3>"]}`;
+
+  return promptTemplate.replace(/\$\{topics\}/g, topicList);
+}
+
+function normalizeLabel(label: string, maxLength = 60): string {
+  return label
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength)
+    .trim();
+}
+
+function normalizeKey(label: string): string {
+  return normalizeLabel(label, 80).toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizeKeywords(keywords: unknown): string[] {
+  if (!Array.isArray(keywords)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const keyword of keywords) {
+    const label = normalizeLabel(String(keyword || ""), 40);
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    result.push(label);
+    if (result.length >= 5) break;
+  }
+  return result;
+}
+
+function getCategoryRules(): CategoryRule[] {
+  const text = getPref<string>("categorySynonyms") || "";
+  if (text.trim() === LEGACY_DEFAULT_CATEGORY_SYNONYMS.trim()) {
+    return [];
+  }
+
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [canonicalPart, aliasPart = ""] = line.split("=");
+      const canonical = normalizeLabel(canonicalPart);
+      const aliases = aliasPart
+        .split(/[,，;；]/)
+        .map((alias) => normalizeLabel(alias))
+        .filter(Boolean);
+      return { canonical, aliases };
+    })
+    .filter((rule) => !!rule.canonical);
+}
+
+function getChildCollectionNames(parentCollection?: any | null): string[] {
+  if (!parentCollection?.id) return [];
+  try {
+    return Zotero.Collections.getByLibrary(parentCollection.libraryID)
+      .filter((collection: any) => collection.parentID === parentCollection.id)
+      .map((collection: any) => normalizeLabel(collection.name))
+      .filter(Boolean);
+  } catch (e) {
+    ztoolkit.log(`[DailyPaper] Failed to read child collection names: ${e}`);
+    return [];
+  }
+}
+
+function uniqueLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const label of labels) {
+    const normalized = normalizeLabel(label);
+    const key = normalizeKey(normalized);
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function getCategoryCandidates(parentCollection?: any | null): string[] {
+  const rules = getCategoryRules();
+  return uniqueLabels([
+    ...getChildCollectionNames(parentCollection),
+    ...rules.map((rule) => rule.canonical),
+    "未分类",
+  ]).slice(0, 60);
+}
+
+function canonicalizeCategory(category: string, candidates: string[]): string {
+  const label = normalizeLabel(category || "未分类");
+  const key = normalizeKey(label);
+  const rules = getCategoryRules();
+
+  for (const rule of rules) {
+    const canonicalKey = normalizeKey(rule.canonical);
+    const aliasKeys = rule.aliases.map((alias) => normalizeKey(alias));
+    if (
+      key === canonicalKey ||
+      aliasKeys.some(
+        (aliasKey) =>
+          aliasKey.length >= 3 && (key === aliasKey || key.includes(aliasKey)),
+      )
+    ) {
+      return rule.canonical;
+    }
+  }
+
+  const exactCandidate = candidates.find(
+    (candidate) => normalizeKey(candidate) === key,
+  );
+  return exactCandidate || "未分类";
+}
+
+function mergeKeywords(...keywordGroups: string[][]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const group of keywordGroups) {
+    for (const keyword of group) {
+      const label = normalizeLabel(keyword, 40);
+      const key = label.toLowerCase();
+      if (!label || seen.has(key)) continue;
+      seen.add(key);
+      result.push(label);
+      if (result.length >= 5) return result;
+    }
+  }
+  return result;
+}
+
+function getSourceKeywords(item: any): string[] {
+  const tags = item.getTags ? item.getTags() : [];
+  const sourceTags = tags
+    .map((t: any) => String(t.tag || ""))
+    .filter((tag: string) => {
+      const lower = tag.toLowerCase();
+      return (
+        tag &&
+        !lower.startsWith("dp-") &&
+        lower !== "dp-relevant" &&
+        lower !== "dp-irrelevant"
+      );
+    });
+  return normalizeKeywords(sourceTags);
+}
+
+async function classifyPaper(
+  text: string,
+  title: string,
+  apiKey: string,
+  sourceKeywords: string[],
+  parentCollection?: any | null,
+): Promise<PaperClassification | null> {
+  if (!getPref<boolean>("autoClassify")) return null;
+
+  const systemPrompt = buildClassifySystemPrompt();
+  const sourceKeywordText = sourceKeywords.length
+    ? sourceKeywords.join("; ")
+    : "无";
+  const categoryOptions = getCategoryCandidates(parentCollection);
+  const categoryText = categoryOptions
+    .map((category) => `- ${category}`)
+    .join("\n");
+  const userPrompt = `【候选分类名，category 必须从中选择】\n${categoryText}\n\n【论文标题】\n${title}\n\n【论文自带关键词】\n${sourceKeywordText}\n\n【论文摘要/内容节选】\n${text.slice(0, 3000)}`;
+
+  try {
+    const resp = await callAPI(apiKey, systemPrompt, userPrompt, 300);
+    const data = parseJSON(resp);
+    const category = canonicalizeCategory(
+      String(data.category || "未分类"),
+      categoryOptions,
     );
-  
+    const keywords = mergeKeywords(
+      sourceKeywords,
+      normalizeKeywords(data.keywords),
+    );
+    if (!category && !keywords.length) return null;
+    return {
+      category: category || "未分类",
+      keywords,
+      sourceKeywords,
+    };
+  } catch (e) {
+    ztoolkit.log(`[DailyPaper] Classification failed: ${e}`);
+    return null;
+  }
+}
+
+function getExistingClassification(item: any): PaperClassification | null {
+  const extra = (item.getField("extra") as string) || "";
+  const category = normalizeLabel(
+    /^DP-Category:\s*(.+)$/m.exec(extra)?.[1] || "",
+  );
+  if (!category) return null;
+
+  const sourceKeywords = normalizeKeywords(
+    /^DP-Source-Keywords:\s*(.+)$/m.exec(extra)?.[1]?.split(/\s*,\s*/),
+  );
+  const keywords = normalizeKeywords(
+    /^DP-Keywords:\s*(.+)$/m.exec(extra)?.[1]?.split(/\s*,\s*/),
+  );
+
+  return {
+    category,
+    keywords,
+    sourceKeywords,
+  };
+}
+
+function applyClassificationToItem(
+  item: any,
+  classification: PaperClassification | null,
+): void {
+  if (!classification) return;
+
+  const oldTags = item
+    .getTags()
+    .filter(
+      (t: any) =>
+        t.tag.startsWith("dp-category-") || t.tag.startsWith("dp-keyword-"),
+    );
+  for (const tag of oldTags) {
+    item.removeTag(tag.tag);
+  }
+
+  item.addTag(`dp-category-${classification.category}`);
+  for (const keyword of classification.keywords) {
+    item.addTag(keyword);
+  }
+
+  const existingExtra = (item.getField("extra") as string) || "";
+  const lines = existingExtra
+    .split("\n")
+    .filter(
+      (line) =>
+        !line.startsWith("DP-Category:") &&
+        !line.startsWith("DP-Source-Keywords:") &&
+        !line.startsWith("DP-Keywords:"),
+    );
+  lines.push(`DP-Category: ${classification.category}`);
+  if (classification.sourceKeywords.length) {
+    lines.push(
+      `DP-Source-Keywords: ${classification.sourceKeywords.join(", ")}`,
+    );
+  }
+  if (classification.keywords.length) {
+    lines.push(`DP-Keywords: ${classification.keywords.join(", ")}`);
+  }
+  item.setField("extra", lines.join("\n").trim());
+}
+
+function setScoreExtra(item: any, score: number, reason: string): void {
+  const existingExtra = (item.getField("extra") as string) || "";
+  const lines = existingExtra
+    .split("\n")
+    .filter(
+      (line) => !line.startsWith("DP-Score:") && !line.startsWith("DP-Reason:"),
+    );
+  lines.push(`DP-Score: ${score}/10`);
+  if (reason) {
+    lines.push(`DP-Reason: ${reason}`);
+  }
+  item.setField("extra", lines.join("\n").trim());
+}
+
+// ── Collection ────────────────────────────────────────────────────────────────
+let targetCollectionPromise: Promise<any> | null = null;
+let targetCollectionName = "";
+const childCollectionPromises = new Map<string, Promise<any>>();
+
+async function getOrCreateTargetCollection(
+  collectionName: string,
+): Promise<any> {
+  const userLibID = Zotero.Libraries.userLibraryID;
+  if (targetCollectionPromise && targetCollectionName === collectionName) {
+    return targetCollectionPromise;
+  }
+
+  targetCollectionName = collectionName;
+  targetCollectionPromise = (async () => {
     let target = Zotero.Collections.getByLibrary(userLibID).find(
       (c: any) => c.name.toLowerCase() === collectionName.toLowerCase(),
     );
-  
+
     if (!target) {
       target = new Zotero.Collection({
         libraryID: userLibID,
@@ -150,86 +490,201 @@ async function moveToCollection(item: any): Promise<void> {
         `[DailyPaper] Created collection "${collectionName}" (id=${target.id})`,
       );
     }
-  
-    let targetItem = item;
-  
-    if (item.isFeedItem) {
-      if (await existsInLibrary(item)) {
-        ztoolkit.log(`[DailyPaper] Already in library, skipping: "${item.getField("title")}"`);
-        return;
-      }
-      try {
-        ztoolkit.log(
-          `[DailyPaper] Translating feed item to user library ${userLibID}...`,
-        );
-        const translated = await item.translate(userLibID, false);
-  
-        if (Array.isArray(translated)) {
-          ztoolkit.log(
-            `[DailyPaper] translate() returned array length=${translated.length}`,
-          );
-          targetItem = translated[0];
-        } else {
-          targetItem = translated;
-        }
-  
-        if (!targetItem) {
-            ztoolkit.log("[DailyPaper] translate() returned null/undefined, trying manual copy");
-            throw new Error("translate returned null");
-          }          
-  
-        ztoolkit.log(
-          `[DailyPaper] Feed translated successfully: newItemID=${targetItem.id}, newLibraryID=${targetItem.libraryID}`,
-        );
-      } catch (e) {
-        ztoolkit.log(`[DailyPaper] translate failed, trying manual copy: ${e}`);
-        try {
-          const newItem = new Zotero.Item("journalArticle");
-          newItem.libraryID = userLibID;
-          for (const field of ["title", "DOI", "abstractNote", "url", "date", "publicationTitle"]) {
-            try {
-              const val = item.getField(field);
-              if (val) newItem.setField(field, val);
-            } catch (_) {}
-          }
-          const creators = item.getCreators?.();
-          if (creators?.length) newItem.setCreators(creators);
-          await newItem.saveTx();
-          targetItem = newItem;
-  
-          const dpTags = item.getTags()
-            .filter((t: any) => t.tag.startsWith("dp-"))
-            .map((t: any) => t.tag);
-          for (const tag of dpTags) {
-            targetItem.addTag(tag);
-          }
-  
-          const scoreTag = dpTags.find((t: string) => t.startsWith("dp-score-"));
-          if (scoreTag) {
-            const score = scoreTag.replace("dp-score-", "");
-            targetItem.setField("extra", `DP-Score: ${score}/10`);
-          }
-  
-          await targetItem.saveTx();
-          ztoolkit.log(`[DailyPaper] Manual copy succeeded: newItemID=${targetItem.id}`);
-        } catch (e2) {
-          ztoolkit.log(`[DailyPaper] Manual copy also failed: ${e2}`);
-          return;
-        }
-      }
-    }
-  
-    try {
-      targetItem.addToCollection(target.id);
-      await targetItem.saveTx();
+
+    return target;
+  })();
+
+  try {
+    return await targetCollectionPromise;
+  } catch (e) {
+    targetCollectionPromise = null;
+    throw e;
+  }
+}
+
+async function getOrCreateChildCollection(
+  parent: any,
+  category: string,
+): Promise<any> {
+  const name = normalizeLabel(category || "未分类");
+  const key = `${parent.libraryID}:${parent.id}:${name.toLowerCase()}`;
+  const existingPromise = childCollectionPromises.get(key);
+  if (existingPromise) return existingPromise;
+
+  const promise = (async () => {
+    let child = Zotero.Collections.getByLibrary(parent.libraryID).find(
+      (c: any) =>
+        c.parentID === parent.id && c.name.toLowerCase() === name.toLowerCase(),
+    );
+
+    if (!child) {
+      child = new Zotero.Collection({
+        libraryID: parent.libraryID,
+        name,
+        parentID: parent.id,
+      });
+      await child.saveTx();
       ztoolkit.log(
-        `[DailyPaper] Item ${targetItem.id} added to collection "${collectionName}"`,
+        `[DailyPaper] Created child collection "${parent.name}/${name}" (id=${child.id})`,
+      );
+    }
+
+    return child;
+  })();
+
+  childCollectionPromises.set(key, promise);
+  try {
+    return await promise;
+  } catch (e) {
+    childCollectionPromises.delete(key);
+    throw e;
+  }
+}
+
+async function addToCategoryChildCollection(
+  item: any,
+  parent: any,
+  classification: PaperClassification | null,
+): Promise<boolean> {
+  if (!classification?.category || !parent?.id) return false;
+
+  try {
+    const child = await getOrCreateChildCollection(
+      parent,
+      classification.category,
+    );
+    item.addToCollection(child.id);
+    await item.saveTx();
+    ztoolkit.log(
+      `[DailyPaper] Item ${item.id} added to category collection "${parent.name}/${classification.category}"`,
+    );
+    return true;
+  } catch (e) {
+    ztoolkit.log(
+      `[DailyPaper] Failed to add item to category collection: ${e}`,
+    );
+    return false;
+  }
+}
+
+async function moveToCollection(
+  item: any,
+  classification: PaperClassification | null = null,
+): Promise<boolean> {
+  const collectionName = getPref<string>("collection") || "dailypaper";
+  const userLibID = Zotero.Libraries.userLibraryID;
+
+  ztoolkit.log(
+    `[DailyPaper] moveToCollection start: title="${item.getField?.("title")}", itemID=${item.id}, libraryID=${item.libraryID}, isFeedItem=${!!item.isFeedItem}`,
+  );
+
+  const target = await getOrCreateTargetCollection(collectionName);
+
+  let targetItem = item;
+
+  if (item.isFeedItem) {
+    if (await existsInLibrary(item)) {
+      ztoolkit.log(
+        `[DailyPaper] Already in library, skipping: "${item.getField("title")}"`,
+      );
+      return false;
+    }
+    try {
+      ztoolkit.log(
+        `[DailyPaper] Translating feed item to user library ${userLibID}...`,
+      );
+      const translated = await item.translate(userLibID, false);
+
+      if (Array.isArray(translated)) {
+        ztoolkit.log(
+          `[DailyPaper] translate() returned array length=${translated.length}`,
+        );
+        targetItem = translated[0];
+      } else {
+        targetItem = translated;
+      }
+
+      if (!targetItem) {
+        ztoolkit.log(
+          "[DailyPaper] translate() returned null/undefined, trying manual copy",
+        );
+        throw new Error("translate returned null");
+      }
+
+      ztoolkit.log(
+        `[DailyPaper] Feed translated successfully: newItemID=${targetItem.id}, newLibraryID=${targetItem.libraryID}`,
       );
     } catch (e) {
-      ztoolkit.log(`[DailyPaper] Failed to add item to collection: ${e}`);
+      ztoolkit.log(`[DailyPaper] translate failed, trying manual copy: ${e}`);
+      try {
+        const newItem = new Zotero.Item("journalArticle");
+        newItem.libraryID = userLibID;
+        for (const field of [
+          "title",
+          "DOI",
+          "abstractNote",
+          "url",
+          "date",
+          "publicationTitle",
+        ]) {
+          try {
+            const val = item.getField(field);
+            if (val) newItem.setField(field, val);
+          } catch (e) {
+            ztoolkit.log(`[DailyPaper] Failed to copy field "${field}": ${e}`);
+          }
+        }
+        const creators = item.getCreators?.();
+        if (creators?.length) newItem.setCreators(creators);
+        await newItem.saveTx();
+        targetItem = newItem;
+
+        const dpTags = item
+          .getTags()
+          .filter((t: any) => t.tag.startsWith("dp-"))
+          .map((t: any) => t.tag);
+        for (const tag of dpTags) {
+          targetItem.addTag(tag);
+        }
+
+        const scoreTag = dpTags.find((t: string) => t.startsWith("dp-score-"));
+        if (scoreTag) {
+          const score = scoreTag.replace("dp-score-", "");
+          targetItem.setField("extra", `DP-Score: ${score}/10`);
+        }
+
+        await targetItem.saveTx();
+        ztoolkit.log(
+          `[DailyPaper] Manual copy succeeded: newItemID=${targetItem.id}`,
+        );
+      } catch (e2) {
+        ztoolkit.log(`[DailyPaper] Manual copy also failed: ${e2}`);
+        return false;
+      }
     }
-  }  
-  
+  }
+
+  try {
+    applyClassificationToItem(targetItem, classification);
+    targetItem.addToCollection(target.id);
+    if (classification?.category) {
+      const child = await getOrCreateChildCollection(
+        target,
+        classification.category,
+      );
+      targetItem.addToCollection(child.id);
+    }
+    await targetItem.saveTx();
+    ztoolkit.log(
+      `[DailyPaper] Item ${targetItem.id} added to collection "${collectionName}"`,
+    );
+    return true;
+  } catch (e) {
+    ztoolkit.log(`[DailyPaper] Failed to add item to collection: ${e}`);
+    return false;
+  }
+}
+
 // ── Extract text ──────────────────────────────────────────────────────────────
 
 export async function extractText(item: any): Promise<string | null> {
@@ -297,9 +752,14 @@ function smartChunk(text: string, maxChars = 27000): string {
 }
 
 function markdownToHtml(md: string): string {
-    return md
+  return (
+    md
       // 代码块
-      .replace(/```[\s\S]*?```/g, (m) => `<pre><code>${m.slice(3, -3).replace(/^[^\n]*\n/, "")}</code></pre>`)
+      .replace(
+        /```[\s\S]*?```/g,
+        (m) =>
+          `<pre><code>${m.slice(3, -3).replace(/^[^\n]*\n/, "")}</code></pre>`,
+      )
       // ### 标题
       .replace(/^### (.+)$/gm, "<h3>$1</h3>")
       .replace(/^## (.+)$/gm, "<h2>$1</h2>")
@@ -310,10 +770,17 @@ function markdownToHtml(md: string): string {
       .replace(/\*(.+?)\*/g, "<em>$1</em>")
       // 表格（简单处理）
       .replace(/^\|(.+)\|$/gm, (row) => {
-        const cells = row.split("|").slice(1, -1).map((c) => `<td>${c.trim()}</td>`).join("");
+        const cells = row
+          .split("|")
+          .slice(1, -1)
+          .map((c) => `<td>${c.trim()}</td>`)
+          .join("");
         return `<tr>${cells}</tr>`;
       })
-      .replace(/(<tr>.*<\/tr>\n?)+/g, (t) => `<table border="1" cellpadding="4">${t}</table>`)
+      .replace(
+        /(<tr>.*<\/tr>\n?)+/g,
+        (t) => `<table border="1" cellpadding="4">${t}</table>`,
+      )
       // 分隔线
       .replace(/^---$/gm, "<hr/>")
       // 无序列表
@@ -324,9 +791,9 @@ function markdownToHtml(md: string): string {
       // 引用块
       .replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>")
       // 换行
-      .replace(/\n/g, "<br/>");
-  }
-  
+      .replace(/\n/g, "<br/>")
+  );
+}
 
 // ── Process single item ───────────────────────────────────────────────────────
 
@@ -348,12 +815,12 @@ export async function processItem(item: any, apiKey: string): Promise<void> {
   const hasFulltext = text.length > 500;
 
   const header = `【期刊】${journal}\n【标题】${title}\n【作者】${authors}\n\n`;
-  
+
   // 从配置中读取 prompt 模板
-  const systemPrompt = hasFulltext 
-    ? (getPref<string>("analyzePromptFulltext") || getDefaultFulltextPrompt())
-    : (getPref<string>("analyzePromptAbstract") || getDefaultAbstractPrompt());
-    
+  const systemPrompt = hasFulltext
+    ? getPref<string>("analyzePromptFulltext") || getDefaultFulltextPrompt()
+    : getPref<string>("analyzePromptAbstract") || getDefaultAbstractPrompt();
+
   const body = hasFulltext
     ? `【论文正文（已提取关键段落）】\n${smartChunk(text)}`
     : `【论文摘要】\n${text}`;
@@ -464,6 +931,130 @@ function showAlert(msg: string) {
   (Zotero.getMainWindow() as any).alert(msg);
 }
 
+type ScoreItemResult = {
+  relevant: boolean;
+  moved: boolean;
+  category?: string;
+  message: string;
+};
+
+function getScoreConcurrency(): number {
+  const value = Number(getPref<number>("scoreConcurrency") || 5);
+  return Math.max(
+    1,
+    Math.min(10, Number.isFinite(value) ? Math.floor(value) : 5),
+  );
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        await worker(items[index], index);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }),
+  );
+}
+
+async function scoreItem(
+  item: any,
+  apiKey: string,
+  threshold: number,
+  options: {
+    moveRelevant?: boolean;
+    markRead?: boolean;
+    forceClassify?: boolean;
+    categoryParent?: any | null;
+  } = {},
+): Promise<ScoreItemResult> {
+  const title = (item.getField("title") as string) || "未知标题";
+  const abstract = (item.getField("abstractNote") as string) || "";
+  const text = abstract || title;
+  const { score, reason } = await scoreRelevance(
+    abstract || title,
+    title,
+    apiKey,
+  );
+
+  const oldScoreTags = item
+    .getTags()
+    .filter((t: any) => t.tag.startsWith("dp-score-"));
+  for (const t of oldScoreTags) {
+    item.removeTag(t.tag);
+  }
+
+  item.addTag(`dp-score-${score}`);
+
+  setScoreExtra(item, score, reason);
+
+  const isRelevant = score >= threshold;
+  const sourceKeywords = isRelevant ? getSourceKeywords(item) : [];
+  const categoryParent =
+    options.categoryParent ||
+    (isRelevant && item.isFeedItem && options.moveRelevant !== false
+      ? await getOrCreateTargetCollection(
+          getPref<string>("collection") || "dailypaper",
+        )
+      : null);
+  const classification = isRelevant
+    ? options.forceClassify
+      ? await classifyPaper(text, title, apiKey, sourceKeywords, categoryParent)
+      : getExistingClassification(item) ||
+        (await classifyPaper(
+          text,
+          title,
+          apiKey,
+          sourceKeywords,
+          categoryParent,
+        ))
+    : null;
+  applyClassificationToItem(item, classification);
+
+  if (isRelevant) {
+    item.removeTag("dp-irrelevant");
+    item.addTag("dp-relevant");
+  } else {
+    item.removeTag("dp-relevant");
+    item.addTag("dp-irrelevant");
+  }
+
+  if (options.markRead) {
+    item.isRead = true;
+  }
+
+  await item.saveTx();
+
+  let moved = false;
+  if (isRelevant && options.moveRelevant !== false) {
+    moved = await moveToCollection(item, classification);
+  }
+
+  ztoolkit.log(
+    `[DailyPaper] Successfully scored item "${title}" with score ${score}, tags: ${item
+      .getTags()
+      .map((t: any) => t.tag)
+      .join(", ")}`,
+  );
+
+  return {
+    relevant: isRelevant,
+    moved,
+    category: classification?.category,
+    message: `${score}分 ${isRelevant ? "✓" : "✗"}${
+      classification?.category ? ` [${classification.category}]` : ""
+    }  ${title.slice(0, 60)}`,
+  };
+}
+
 export async function scoreSelected(): Promise<void> {
   const apiKey = getPref<string>("apiKey");
   if (!apiKey) {
@@ -476,10 +1067,17 @@ export async function scoreSelected(): Promise<void> {
     showAlert("请先选中文章");
     return;
   }
+  const parentCollection = getSelectedCollection(win);
 
   const threshold = getPref<number>("scoreThreshold") || 4;
+  const concurrency = getScoreConcurrency();
   const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
-  progressWin.changeHeadline(`📄 DailyPaper: 评分中 0/${items.length}`);
+  progressWin.changeHeadline(
+    `📄 DailyPaper: 并行评分中 0/${items.length}（并发 ${Math.min(
+      concurrency,
+      items.length,
+    )}）`,
+  );
   progressWin.show();
   const itemProgress = new progressWin.ItemProgress(
     "chrome://zotero/skin/spinner-16px.png",
@@ -487,73 +1085,202 @@ export async function scoreSelected(): Promise<void> {
   );
 
   const results: string[] = [];
+  let done = 0;
   let relevant = 0;
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+  await runWithConcurrency(items, concurrency, async (item) => {
     const title = (item.getField("title") as string) || "未知标题";
-    progressWin.changeHeadline(`📄 DailyPaper: 评分中 ${i + 1}/${items.length}`);
-    itemProgress.setText(title.slice(0, 60));
-
     try {
-      const abstract = (item.getField("abstractNote") as string) || "";
-      const score = await scoreRelevance(abstract || title, title, apiKey);
-
-      // 移除旧的评分标签
-      const oldScoreTags = item
-        .getTags()
-        .filter((t: any) => t.tag.startsWith("dp-score-"));
-      for (const t of oldScoreTags) {
-        item.removeTag(t.tag);
-      }
-      
-      // 添加新评分标签
-      item.addTag(`dp-score-${score}`);
- 
-      // 写入 extra 字段
-      const existingExtra = (item.getField("extra") as string) || "";
-      const newExtra = existingExtra
-        .split("\n")
-        .filter((l) => !l.startsWith("DP-Score:"))
-        .concat(`DP-Score: ${score}/10`)
-        .join("\n")
-        .trim();
-      item.setField("extra", newExtra);
-      
-      // 先保存标签和extra字段
-      await item.saveTx();
-
-      // 添加相关标签并再次保存
-      if (score < threshold) {
-        item.removeTag("dp-relevant");
-        item.addTag("dp-irrelevant");
-        await item.saveTx();
-        results.push(`${score}分 ✗  ${title.slice(0, 60)}`);
-      } else {
-        item.removeTag("dp-irrelevant");
-        item.addTag("dp-relevant");
-        await item.saveTx();
+      const result = await scoreItem(item, apiKey, threshold, {
+        moveRelevant: !!item.isFeedItem,
+        categoryParent: item.isFeedItem ? null : parentCollection,
+      });
+      results.push(result.message);
+      if (result.relevant) {
         relevant++;
-        results.push(`${score}分 ✓  ${title.slice(0, 60)}`);
-        await moveToCollection(item);
       }
-      
-      ztoolkit.log(
-        `[DailyPaper] Successfully scored item "${title}" with score ${score}, tags: ${item.getTags().map((t: any) => t.tag).join(", ")}`,
-      );
     } catch (e) {
       results.push(`ERR ✗  ${title.slice(0, 60)}`);
       ztoolkit.log(`[DailyPaper] Error scoring: ${e}`);
     }
-    await new Promise((r) => setTimeout(r, 0));
-  }
+    done++;
+    progressWin.changeHeadline(
+      `📄 DailyPaper: 并行评分中 ${done}/${items.length}`,
+    );
+    itemProgress.setText(`${done}/${items.length}，${relevant} 篇相关`);
+    itemProgress.setProgress((done / items.length) * 100);
+  });
 
   progressWin.close();
   win.alert(
-    `评分完成：${relevant}/${items.length} 篇相关\n\n` +
-      results.join("\n"),
+    `评分完成：${relevant}/${items.length} 篇相关\n\n` + results.join("\n"),
   );
-  
+}
+
+export async function reclassifySelected(): Promise<void> {
+  const apiKey = getPref<string>("apiKey");
+  if (!apiKey) {
+    showAlert("请先在 工具 → DailyPaper 设置 中填写 API Key");
+    return;
+  }
+
+  const win = Zotero.getMainWindow() as any;
+  const items: any[] = win.ZoteroPane.getSelectedItems();
+  if (!items.length) {
+    showAlert("请先选中文章");
+    return;
+  }
+  const parentCollection = getSelectedCollection(win);
+
+  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
+  progressWin.changeHeadline(`🏷️ DailyPaper: 重新分类 0/${items.length}`);
+  progressWin.show();
+  const itemProgress = new progressWin.ItemProgress(
+    "chrome://zotero/skin/spinner-16px.png",
+    "准备中...",
+  );
+
+  const results: string[] = [];
+  let done = 0;
+  let classified = 0;
+  const concurrency = getScoreConcurrency();
+
+  await runWithConcurrency(items, concurrency, async (item) => {
+    const title = (item.getField("title") as string) || "未知标题";
+    try {
+      const abstract = (item.getField("abstractNote") as string) || "";
+      const sourceKeywords = getSourceKeywords(item);
+      const classification = await classifyPaper(
+        abstract || title,
+        title,
+        apiKey,
+        sourceKeywords,
+        parentCollection,
+      );
+      if (classification) {
+        applyClassificationToItem(item, classification);
+        await item.saveTx();
+        if (parentCollection?.id) {
+          await addToCategoryChildCollection(
+            item,
+            parentCollection,
+            classification,
+          );
+        }
+        classified++;
+        results.push(`[${classification.category}] ${title.slice(0, 60)}`);
+      } else {
+        results.push(`未分类 ${title.slice(0, 60)}`);
+      }
+    } catch (e) {
+      results.push(`ERR ${title.slice(0, 60)}`);
+      ztoolkit.log(`[DailyPaper] Error reclassifying: ${e}`);
+    }
+
+    done++;
+    progressWin.changeHeadline(
+      `🏷️ DailyPaper: 重新分类 ${done}/${items.length}`,
+    );
+    itemProgress.setText(`${done}/${items.length}，${classified} 篇已分类`);
+    itemProgress.setProgress((done / items.length) * 100);
+  });
+
+  progressWin.close();
+  win.alert(
+    `重新分类完成：${classified}/${items.length} 篇\n\n${results.join("\n")}`,
+  );
+}
+
+function getSelectedCollection(win: any): any | null {
+  try {
+    return (
+      win.ZoteroPane.getSelectedCollection?.() ||
+      win.ZoteroPane.collectionsView?.selectedTreeRow?.ref ||
+      null
+    );
+  } catch (e) {
+    ztoolkit.log(`[DailyPaper] Failed to read selected collection: ${e}`);
+    return null;
+  }
+}
+
+export async function classifyCurrentCollection(): Promise<void> {
+  const apiKey = getPref<string>("apiKey");
+  if (!apiKey) {
+    showAlert("请先在 工具 → DailyPaper 设置 中填写 API Key");
+    return;
+  }
+
+  const win = Zotero.getMainWindow() as any;
+  const collection = getSelectedCollection(win);
+  if (!collection?.getChildItems) {
+    showAlert("请先在左侧选中一个 Collection");
+    return;
+  }
+
+  const itemIDs = collection.getChildItems(true) as number[];
+  const allItems = (await Zotero.Items.getAsync(itemIDs)) as any[];
+  const items = allItems.filter((item: any) => item.isRegularItem?.());
+  if (!items.length) {
+    showAlert("当前 Collection 里没有可分类的普通文献");
+    return;
+  }
+
+  const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
+  progressWin.changeHeadline(
+    `🏷️ DailyPaper: 分类 Collection 0/${items.length}`,
+  );
+  progressWin.show();
+  const itemProgress = new progressWin.ItemProgress(
+    "chrome://zotero/skin/spinner-16px.png",
+    "准备中...",
+  );
+
+  let done = 0;
+  let classified = 0;
+  const results: string[] = [];
+  const concurrency = getScoreConcurrency();
+
+  await runWithConcurrency(items, concurrency, async (item) => {
+    const title = (item.getField("title") as string) || "未知标题";
+    try {
+      const abstract = (item.getField("abstractNote") as string) || "";
+      const sourceKeywords = getSourceKeywords(item);
+      const classification =
+        getExistingClassification(item) ||
+        (await classifyPaper(
+          abstract || title,
+          title,
+          apiKey,
+          sourceKeywords,
+          collection,
+        ));
+      if (classification) {
+        applyClassificationToItem(item, classification);
+        await item.saveTx();
+        await addToCategoryChildCollection(item, collection, classification);
+        classified++;
+        results.push(`[${classification.category}] ${title.slice(0, 60)}`);
+      }
+    } catch (e) {
+      results.push(`ERR ${title.slice(0, 60)}`);
+      ztoolkit.log(`[DailyPaper] Error classifying collection item: ${e}`);
+    }
+
+    done++;
+    progressWin.changeHeadline(
+      `🏷️ DailyPaper: 分类 Collection ${done}/${items.length}`,
+    );
+    itemProgress.setText(`${done}/${items.length}，${classified} 篇已分类`);
+    itemProgress.setProgress((done / items.length) * 100);
+  });
+
+  progressWin.close();
+  win.alert(
+    `Collection 分类完成：${classified}/${items.length} 篇\n\n${results
+      .slice(0, 30)
+      .join("\n")}`,
+  );
 }
 
 export async function analyzeSelected(): Promise<void> {
@@ -563,8 +1290,8 @@ export async function analyzeSelected(): Promise<void> {
     return;
   }
   const win = Zotero.getMainWindow() as any;
-  const items: any[] = win.ZoteroPane.getSelectedItems().filter(
-    (item: any) => item.isRegularItem(),
+  const items: any[] = win.ZoteroPane.getSelectedItems().filter((item: any) =>
+    item.isRegularItem(),
   );
   if (!items.length) {
     showAlert("请先选中文章（Feed 条目需先转为普通条目）");
@@ -616,8 +1343,14 @@ export async function scoreFeedItems(): Promise<void> {
   }
 
   const threshold = getPref<number>("scoreThreshold") || 4;
+  const concurrency = getScoreConcurrency();
   const progressWin = new Zotero.ProgressWindow({ closeOnClick: false });
-  progressWin.changeHeadline("📰 DailyPaper: 批量评分 Feed...");
+  progressWin.changeHeadline(
+    `📰 DailyPaper: 批量评分 Feed...（并发 ${Math.min(
+      concurrency,
+      items.length,
+    )}）`,
+  );
   progressWin.show();
   const itemProgress = new progressWin.ItemProgress(
     "chrome://zotero/skin/spinner-16px.png",
@@ -627,90 +1360,33 @@ export async function scoreFeedItems(): Promise<void> {
   let done = 0;
   let relevant = 0;
   let moved = 0;
-  const CONCURRENCY = 5;
 
-  const processNext = async (index: number) => {
-    if (index >= items.length) {
-        itemProgress.setText(
-            `完成！${relevant}/${items.length} 篇相关，${moved} 篇已加入文库`,
-          );          
-      itemProgress.setProgress(100);
-      progressWin.startCloseTimer(8000);
-      return;
+  await runWithConcurrency(items, concurrency, async (item) => {
+    try {
+      const result = await scoreItem(item, apiKey, threshold, {
+        markRead: true,
+      });
+      if (result.relevant) {
+        relevant++;
+      }
+      if (result.moved) {
+        moved++;
+      }
+    } catch (e) {
+      ztoolkit.log(
+        `[DailyPaper] Error scoring item "${item.getField("title")}" (id=${item.id}): ${e}`,
+      );
     }
-    const batch = items.slice(index, index + CONCURRENCY);
-    await Promise.all(
-      batch.map(async (item: any) => {
-        try {
-          const title = item.getField("title") as string;
-          const abstract = (item.getField("abstractNote") as string) || "";
-          const score = await scoreRelevance(abstract || title, title, apiKey);
+    done++;
+    itemProgress.setText(`${done}/${items.length}，${relevant} 篇相关`);
+    itemProgress.setProgress((done / items.length) * 100);
+  });
 
-          // 移除旧的评分标签
-          const oldScoreTags = item
-            .getTags()
-            .filter((t: any) => t.tag.startsWith("dp-score-"));
-          for (const t of oldScoreTags) {
-            item.removeTag(t.tag);
-          }
-          
-          // 添加新评分标签并立即保存
-          item.addTag(`dp-score-${score}`);
-          
-          // 写入 extra 字段
-          const existingExtra = (item.getField("extra") as string) || "";
-          const newExtra = existingExtra
-            .split("\n")
-            .filter((l) => !l.startsWith("DP-Score:"))
-            .concat(`DP-Score: ${score}/10`)
-            .join("\n")
-            .trim();
-          item.setField("extra", newExtra);
-          
-          // 先保存标签和extra字段
-          await item.saveTx();
-
-          // 添加相关标签并再次保存
-          if (score < threshold) {
-            item.removeTag("dp-relevant");
-            item.addTag("dp-irrelevant");
-            await item.saveTx();
-          } else {
-            item.removeTag("dp-irrelevant");
-            item.addTag("dp-relevant");
-            await item.saveTx();
-            relevant++;
-          
-            try {
-              await moveToCollection(item);
-              moved++; 
-            } catch (e) {
-              ztoolkit.log(
-                `[DailyPaper] moveToCollection failed: "${item.getField("title")}": ${e}`,
-              );
-            }
-          }          
-          
-          // 标记为已读
-          item.isRead = true;
-          await item.saveTx();
-          
-          ztoolkit.log(
-            `[DailyPaper] Successfully scored item "${title}" with score ${score}, tags: ${item.getTags().map((t: any) => t.tag).join(", ")}`,
-          );
-        } catch (e) {
-          ztoolkit.log(
-            `[DailyPaper] Error scoring item "${item.getField("title")}" (id=${item.id}): ${e}`,
-          );
-        }
-        done++;
-        itemProgress.setText(`${done}/${items.length}，${relevant} 篇相关`);
-        itemProgress.setProgress((done / items.length) * 100);
-      }),
-    );
-    setTimeout(() => processNext(index + CONCURRENCY), 0);
-  };
-  setTimeout(() => processNext(0), 0);
+  itemProgress.setText(
+    `完成！${relevant}/${items.length} 篇相关，${moved} 篇已加入文库`,
+  );
+  itemProgress.setProgress(100);
+  progressWin.startCloseTimer(8000);
 }
 
 export async function analyzeCollection(): Promise<void> {

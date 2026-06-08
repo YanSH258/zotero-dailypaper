@@ -15,8 +15,12 @@ declare namespace _ZoteroTypes {
       "autoScoreHour": number;
       "autoScoreMinute": number;
       "scoreThreshold": number;
+      "scoreConcurrency": number;
+      "autoClassify": boolean;
+      "categorySynonyms": string;
       "researchTopics": string;
       "scorePromptBase": string;
+      "classifyPromptBase": string;
       "analyzePromptFulltext": string;
       "analyzePromptAbstract": string;
     };

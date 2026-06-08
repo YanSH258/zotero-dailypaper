@@ -7,6 +7,8 @@ import {
   analyzeSelected,
   scoreFeedItems,
   analyzeCollection,
+  reclassifySelected,
+  classifyCurrentCollection,
 } from "./modules/dailypaper";
 
 let _dailyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -52,7 +54,7 @@ function onShutdown(): void {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   addon.data.alive = false;
-  // @ts-expect-error
+  // @ts-expect-error dynamic plugin instance key
   delete Zotero[addon.data.config.addonInstance];
 }
 
@@ -101,6 +103,16 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
           action: scoreFeedItems,
         },
         {
+          id: "dailypaper-context-reclassify",
+          label: "🏷️ DailyPaper: 将所选文献归入子文件夹",
+          action: reclassifySelected,
+        },
+        {
+          id: "dailypaper-context-classify-collection",
+          label: "🗂️ DailyPaper: 将当前 Collection 归入子文件夹",
+          action: classifyCurrentCollection,
+        },
+        {
           id: "dailypaper-context-analyze-collection",
           label: "📚 DailyPaper: 批量解读 Collection",
           action: analyzeCollection,
@@ -110,7 +122,7 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
       contextMenuItems.forEach((item) => {
         const mi = win.document.createXULElement("menuitem");
         mi.id = item.id;
-        mi.label = item.label;
+        mi.setAttribute("label", item.label);
         mi.addEventListener("command", () => {
           item.action().catch((e) => {
             ztoolkit.log(`[DailyPaper] 菜单执行错误: ${e.message}`);
@@ -124,7 +136,7 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
         itemMenu.appendChild(mi);
         ztoolkit.log(`[DailyPaper] 已注册右键菜单: ${item.label}`);
       });
-      
+
       ztoolkit.log("[DailyPaper] ✅ 右键菜单注册成功");
     } else {
       ztoolkit.log("[DailyPaper] ❌ 未找到右键菜单容器");
@@ -156,6 +168,16 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
           action: scoreFeedItems,
         },
         {
+          id: "dailypaper-tools-reclassify",
+          label: "🏷️ DailyPaper: 将所选文献归入子文件夹",
+          action: reclassifySelected,
+        },
+        {
+          id: "dailypaper-tools-classify-collection",
+          label: "🗂️ DailyPaper: 将当前 Collection 归入子文件夹",
+          action: classifyCurrentCollection,
+        },
+        {
           id: "dailypaper-tools-analyze-collection",
           label: "📚 DailyPaper: 批量解读 Collection",
           action: analyzeCollection,
@@ -165,7 +187,7 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
       toolsMenuItems.forEach((item) => {
         const mi = win.document.createXULElement("menuitem");
         mi.id = item.id;
-        mi.label = item.label;
+        mi.setAttribute("label", item.label);
         mi.addEventListener("command", () => {
           item.action().catch((e) => {
             ztoolkit.log(`[DailyPaper] 菜单执行错误: ${e.message}`);
@@ -178,7 +200,7 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
         });
         toolsPopup.appendChild(mi);
       });
-      
+
       ztoolkit.log("[DailyPaper] ✅ 工具菜单注册成功");
     } else {
       ztoolkit.log("[DailyPaper] ❌ 未找到工具菜单容器");
@@ -194,21 +216,21 @@ function scheduleDaily() {
   // 读取配置的自动评分时间（默认 8:00）
   const hour = (getPref("autoScoreHour") as number) ?? 8;
   const minute = (getPref("autoScoreMinute") as number) ?? 0;
-  
+
   const now = new Date();
   const next = new Date();
   next.setHours(hour, minute, 0, 0);
-  
+
   // 如果今天的时间已过，设置为明天
   if (next <= now) {
     next.setDate(next.getDate() + 1);
   }
-  
+
   const delay = next.getTime() - now.getTime();
   ztoolkit.log(
     `[DailyPaper] 下次自动评分时间: ${next.toLocaleString("zh-CN")} (${Math.round(delay / 60000)} 分钟后)`,
   );
-  
+
   _dailyTimer = setTimeout(async () => {
     if (getPref("autoScore")) {
       ztoolkit.log("[DailyPaper] 开始执行定时自动评分...");

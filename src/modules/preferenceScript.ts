@@ -23,38 +23,90 @@ function bindPrefEvents(_window: Window) {
   ) as HTMLTextAreaElement | null;
   if (topicsEl) {
     topicsEl.value =
-      (Zotero.Prefs.get("extensions.dailypaper.researchTopics", true) as string) || "";
-    
+      (Zotero.Prefs.get(
+        "extensions.dailypaper.researchTopics",
+        true,
+      ) as string) || "";
+
     // 使用 blur 事件确保在失去焦点时保存
     topicsEl.addEventListener("blur", () => {
-      Zotero.Prefs.set("extensions.dailypaper.researchTopics", topicsEl.value, true);
+      Zotero.Prefs.set(
+        "extensions.dailypaper.researchTopics",
+        topicsEl.value,
+        true,
+      );
       console.log("[DailyPaper] 研究方向已保存:", topicsEl.value);
     });
-    
+
     // 同时保留 change 事件作为备用
     topicsEl.addEventListener("change", () => {
-      Zotero.Prefs.set("extensions.dailypaper.researchTopics", topicsEl.value, true);
+      Zotero.Prefs.set(
+        "extensions.dailypaper.researchTopics",
+        topicsEl.value,
+        true,
+      );
       console.log("[DailyPaper] 研究方向已保存(change):", topicsEl.value);
+    });
+  }
+
+  const categorySynonymsEl = doc.getElementById(
+    `${prefix}-categorySynonyms`,
+  ) as HTMLTextAreaElement | null;
+  if (categorySynonymsEl) {
+    categorySynonymsEl.value =
+      (Zotero.Prefs.get(
+        "extensions.dailypaper.categorySynonyms",
+        true,
+      ) as string) || "";
+
+    categorySynonymsEl.addEventListener("blur", () => {
+      Zotero.Prefs.set(
+        "extensions.dailypaper.categorySynonyms",
+        categorySynonymsEl.value,
+        true,
+      );
+      console.log("[DailyPaper] 分类同义词表已保存");
+    });
+
+    categorySynonymsEl.addEventListener("change", () => {
+      Zotero.Prefs.set(
+        "extensions.dailypaper.categorySynonyms",
+        categorySynonymsEl.value,
+        true,
+      );
+      console.log("[DailyPaper] 分类同义词表已保存(change)");
     });
   }
 
   // Prompt 配置的 textarea 同步
   const promptFields = [
     { id: "scorePromptBase", pref: "extensions.dailypaper.scorePromptBase" },
-    { id: "analyzePromptFulltext", pref: "extensions.dailypaper.analyzePromptFulltext" },
-    { id: "analyzePromptAbstract", pref: "extensions.dailypaper.analyzePromptAbstract" },
+    {
+      id: "classifyPromptBase",
+      pref: "extensions.dailypaper.classifyPromptBase",
+    },
+    {
+      id: "analyzePromptFulltext",
+      pref: "extensions.dailypaper.analyzePromptFulltext",
+    },
+    {
+      id: "analyzePromptAbstract",
+      pref: "extensions.dailypaper.analyzePromptAbstract",
+    },
   ];
 
   for (const field of promptFields) {
-    const el = doc.getElementById(`${prefix}-${field.id}`) as HTMLTextAreaElement | null;
+    const el = doc.getElementById(
+      `${prefix}-${field.id}`,
+    ) as HTMLTextAreaElement | null;
     if (el) {
       el.value = (Zotero.Prefs.get(field.pref, true) as string) || "";
-      
+
       el.addEventListener("blur", () => {
         Zotero.Prefs.set(field.pref, el.value, true);
         console.log(`[DailyPaper] ${field.id} 已保存`);
       });
-      
+
       el.addEventListener("change", () => {
         Zotero.Prefs.set(field.pref, el.value, true);
         console.log(`[DailyPaper] ${field.id} 已保存(change)`);
@@ -68,6 +120,9 @@ function bindPrefEvents(_window: Window) {
   ) as HTMLInputElement | null;
   const autoScoreMinuteEl = doc.getElementById(
     `${prefix}-autoScoreMinute`,
+  ) as HTMLInputElement | null;
+  const scoreConcurrencyEl = doc.getElementById(
+    `${prefix}-scoreConcurrency`,
   ) as HTMLInputElement | null;
 
   if (autoScoreHourEl) {
@@ -96,14 +151,33 @@ function bindPrefEvents(_window: Window) {
     });
   }
 
+  if (scoreConcurrencyEl) {
+    scoreConcurrencyEl.value = String(
+      Zotero.Prefs.get("extensions.dailypaper.scoreConcurrency", true) || 5,
+    );
+    scoreConcurrencyEl.addEventListener("change", () => {
+      let val = parseInt(scoreConcurrencyEl.value) || 5;
+      val = Math.max(1, Math.min(10, val));
+      scoreConcurrencyEl.value = String(val);
+      Zotero.Prefs.set("extensions.dailypaper.scoreConcurrency", val, true);
+      console.log(`[DailyPaper] 评分并发数已设置为: ${val}`);
+    });
+  }
+
   // 测试 API 连接按钮
   const testBtn = doc.getElementById("dailypaper-test-api");
   const testResult = doc.getElementById("dailypaper-test-result");
   if (testBtn && testResult) {
     testBtn.addEventListener("click", async () => {
-      const apiKey = (Zotero.Prefs.get("extensions.dailypaper.apiKey", true) as string) || "";
-      const apiBase = (Zotero.Prefs.get("extensions.dailypaper.apiBase", true) as string) || "https://api.deepseek.com/v1";
-      const apiModel = (Zotero.Prefs.get("extensions.dailypaper.apiModel", true) as string) || "deepseek-chat";
+      const apiKey =
+        (Zotero.Prefs.get("extensions.dailypaper.apiKey", true) as string) ||
+        "";
+      const apiBase =
+        (Zotero.Prefs.get("extensions.dailypaper.apiBase", true) as string) ||
+        "https://api.deepseek.com/v1";
+      const apiModel =
+        (Zotero.Prefs.get("extensions.dailypaper.apiModel", true) as string) ||
+        "deepseek-chat";
 
       if (!apiKey) {
         testResult.textContent = "❌ 请先填写 API Key";
