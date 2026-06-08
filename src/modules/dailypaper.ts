@@ -979,11 +979,7 @@ async function scoreItem(
   const title = (item.getField("title") as string) || "未知标题";
   const abstract = (item.getField("abstractNote") as string) || "";
   const text = abstract || title;
-  const { score, reason } = await scoreRelevance(
-    abstract || title,
-    title,
-    apiKey,
-  );
+  const { score, reason } = await scoreRelevance(text, title, apiKey);
 
   const oldScoreTags = item
     .getTags()
@@ -1429,34 +1425,25 @@ export async function analyzeCollection(): Promise<void> {
   );
 
   let done = 0;
-  const CONCURRENCY = 3;
+  const concurrency = getScoreConcurrency();
 
-  const processNext = async (index: number) => {
-    if (index >= pending.length) {
-      itemProgress.setText(`完成！共解读 ${done} 篇`);
-      itemProgress.setProgress(100);
-      progressWin.startCloseTimer(8000);
-      return;
-    }
-    const batch = pending.slice(index, index + CONCURRENCY);
-    await Promise.all(
-      batch.map(async (item: any) => {
-        const title = item.getField("title") as string;
-        itemProgress.setText(
-          `${done + 1}/${pending.length}: ${title.slice(0, 40)}`,
-        );
-        try {
-          await processItem(item, apiKey);
-        } catch (e) {
-          ztoolkit.log(`[DailyPaper] Error: ${e}`);
-        }
-        done++;
-        itemProgress.setProgress((done / pending.length) * 100);
-      }),
+  await runWithConcurrency(pending, concurrency, async (item: any) => {
+    const title = item.getField("title") as string;
+    itemProgress.setText(
+      `${done + 1}/${pending.length}: ${title.slice(0, 40)}`,
     );
-    setTimeout(() => processNext(index + CONCURRENCY), 0);
-  };
-  setTimeout(() => processNext(0), 0);
+    try {
+      await processItem(item, apiKey);
+    } catch (e) {
+      ztoolkit.log(`[DailyPaper] Error: ${e}`);
+    }
+    done++;
+    itemProgress.setProgress((done / pending.length) * 100);
+  });
+
+  itemProgress.setText(`完成！共解读 ${done} 篇`);
+  itemProgress.setProgress(100);
+  progressWin.startCloseTimer(8000);
 }
 
 // ── Feed helpers ──────────────────────────────────────────────────────────────
