@@ -13,6 +13,47 @@ import {
 
 let _dailyTimer: ReturnType<typeof setTimeout> | null = null;
 
+type MenuAction = () => Promise<void>;
+
+interface DailyPaperMenuItem {
+  id: string;
+  label: string;
+  action: MenuAction;
+}
+
+const DAILY_PAPER_MENU_ITEMS: DailyPaperMenuItem[] = [
+  {
+    id: "score",
+    label: "📄 评分选中文章",
+    action: scoreSelected,
+  },
+  {
+    id: "analyze",
+    label: "🔬 解读选中文章",
+    action: analyzeSelected,
+  },
+  {
+    id: "score-feed",
+    label: "📰 批量评分 Feed 文章",
+    action: scoreFeedItems,
+  },
+  {
+    id: "reclassify",
+    label: "🏷️ 将所选文献归入子文件夹",
+    action: reclassifySelected,
+  },
+  {
+    id: "classify-collection",
+    label: "🗂️ 将当前 Collection 归入子文件夹",
+    action: classifyCurrentCollection,
+  },
+  {
+    id: "analyze-collection",
+    label: "📚 批量解读 Collection",
+    action: analyzeCollection,
+  },
+];
+
 async function onStartup() {
   await Promise.all([
     Zotero.initializationPromise,
@@ -80,62 +121,11 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
     // ========== 注册右键菜单（主要入口）==========
     const itemMenu = win.document.getElementById("zotero-itemmenu");
     if (itemMenu) {
-      // 添加分隔符
       const sep = win.document.createXULElement("menuseparator");
       sep.id = "dailypaper-context-sep";
       itemMenu.appendChild(sep);
 
-      // 添加右键菜单项
-      const contextMenuItems = [
-        {
-          id: "dailypaper-context-score",
-          label: "📄 DailyPaper: 评分选中文章",
-          action: scoreSelected,
-        },
-        {
-          id: "dailypaper-context-analyze",
-          label: "🔬 DailyPaper: 解读选中文章",
-          action: analyzeSelected,
-        },
-        {
-          id: "dailypaper-context-score-feed",
-          label: "📰 DailyPaper: 批量评分 Feed 文章",
-          action: scoreFeedItems,
-        },
-        {
-          id: "dailypaper-context-reclassify",
-          label: "🏷️ DailyPaper: 将所选文献归入子文件夹",
-          action: reclassifySelected,
-        },
-        {
-          id: "dailypaper-context-classify-collection",
-          label: "🗂️ DailyPaper: 将当前 Collection 归入子文件夹",
-          action: classifyCurrentCollection,
-        },
-        {
-          id: "dailypaper-context-analyze-collection",
-          label: "📚 DailyPaper: 批量解读 Collection",
-          action: analyzeCollection,
-        },
-      ];
-
-      contextMenuItems.forEach((item) => {
-        const mi = win.document.createXULElement("menuitem");
-        mi.id = item.id;
-        mi.setAttribute("label", item.label);
-        mi.addEventListener("command", () => {
-          item.action().catch((e) => {
-            ztoolkit.log(`[DailyPaper] 菜单执行错误: ${e.message}`);
-            Zotero.alert(
-              win,
-              "DailyPaper 错误",
-              `执行失败: ${e.message}\n\n请检查 API 配置是否正确`,
-            );
-          });
-        });
-        itemMenu.appendChild(mi);
-        ztoolkit.log(`[DailyPaper] 已注册右键菜单: ${item.label}`);
-      });
+      itemMenu.appendChild(createDailyPaperMenu(win, "context"));
 
       ztoolkit.log("[DailyPaper] ✅ 右键菜单注册成功");
     } else {
@@ -145,61 +135,11 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
     // ========== 注册工具菜单（备选入口）==========
     const toolsPopup = win.document.getElementById("menu_ToolsPopup");
     if (toolsPopup) {
-      // 添加分隔符
       const sep = win.document.createXULElement("menuseparator");
       sep.id = "dailypaper-tools-sep";
       toolsPopup.appendChild(sep);
 
-      // 添加工具菜单项
-      const toolsMenuItems = [
-        {
-          id: "dailypaper-tools-score",
-          label: "📄 DailyPaper: 评分选中文章",
-          action: scoreSelected,
-        },
-        {
-          id: "dailypaper-tools-analyze",
-          label: "🔬 DailyPaper: 解读选中文章",
-          action: analyzeSelected,
-        },
-        {
-          id: "dailypaper-tools-score-feed",
-          label: "📰 DailyPaper: 批量评分 Feed 文章",
-          action: scoreFeedItems,
-        },
-        {
-          id: "dailypaper-tools-reclassify",
-          label: "🏷️ DailyPaper: 将所选文献归入子文件夹",
-          action: reclassifySelected,
-        },
-        {
-          id: "dailypaper-tools-classify-collection",
-          label: "🗂️ DailyPaper: 将当前 Collection 归入子文件夹",
-          action: classifyCurrentCollection,
-        },
-        {
-          id: "dailypaper-tools-analyze-collection",
-          label: "📚 DailyPaper: 批量解读 Collection",
-          action: analyzeCollection,
-        },
-      ];
-
-      toolsMenuItems.forEach((item) => {
-        const mi = win.document.createXULElement("menuitem");
-        mi.id = item.id;
-        mi.setAttribute("label", item.label);
-        mi.addEventListener("command", () => {
-          item.action().catch((e) => {
-            ztoolkit.log(`[DailyPaper] 菜单执行错误: ${e.message}`);
-            Zotero.alert(
-              win,
-              "DailyPaper 错误",
-              `执行失败: ${e.message}\n\n请检查 API 配置是否正确`,
-            );
-          });
-        });
-        toolsPopup.appendChild(mi);
-      });
+      toolsPopup.appendChild(createDailyPaperMenu(win, "tools"));
 
       ztoolkit.log("[DailyPaper] ✅ 工具菜单注册成功");
     } else {
@@ -210,6 +150,40 @@ function registerMenuItems(win: _ZoteroTypes.MainWindow) {
   }
 
   ztoolkit.log("[DailyPaper] 菜单注册完成");
+}
+
+function createDailyPaperMenu(
+  win: _ZoteroTypes.MainWindow,
+  scope: "context" | "tools",
+) {
+  const menu = win.document.createXULElement("menu");
+  menu.id = `dailypaper-${scope}-menu`;
+  menu.setAttribute("label", "DailyPaper");
+
+  const popup = win.document.createXULElement("menupopup");
+  popup.id = `dailypaper-${scope}-popup`;
+
+  DAILY_PAPER_MENU_ITEMS.forEach((item) => {
+    const mi = win.document.createXULElement("menuitem");
+    mi.id = `dailypaper-${scope}-${item.id}`;
+    mi.setAttribute("label", item.label);
+    mi.addEventListener("command", () => {
+      item.action().catch((e) => {
+        ztoolkit.log(`[DailyPaper] 菜单执行错误: ${e.message}`);
+        Zotero.alert(
+          win,
+          "DailyPaper 错误",
+          `执行失败: ${e.message}\n\n请检查 API 配置是否正确`,
+        );
+      });
+    });
+    popup.appendChild(mi);
+  });
+
+  menu.appendChild(popup);
+  ztoolkit.log(`[DailyPaper] 已注册${scope}子菜单`);
+
+  return menu;
 }
 
 function scheduleDaily() {

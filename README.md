@@ -66,24 +66,24 @@ DFT/第一性原理
 ### 筛选 Feed 新论文
 
 1. 添加并更新 Zotero Feed。
-2. 右键任意条目，选择 `DailyPaper: 批量评分 Feed 文章`。
+2. 右键任意条目，选择 `DailyPaper → 批量评分 Feed 文章`。
 3. 高分文章会加入目标 Collection，并根据目标 Collection 的子文件夹进行细分类。
-4. 选择 `DailyPaper: 批量解读 Collection`，可为 Collection 中的文章生成中文解读笔记。
+4. 选择 `DailyPaper → 批量解读 Collection`，可为 Collection 中的文章生成中文解读笔记。
 
 ### 整理已有文献
 
 1. 在左侧选择需要整理的 Collection。
 2. 为它创建希望使用的分类子文件夹，例如 `表面与界面`、`催化与反应机理`。
-3. 右键选择 `DailyPaper: 将当前 Collection 归入子文件夹`。
+3. 右键选择 `DailyPaper → 将当前 Collection 归入子文件夹`。
 4. AI 会从已有子文件夹中选择最合适的分类；原文献仍保留在当前 Collection 中。
 
-也可以选中部分文献，使用 `DailyPaper: 将所选文献归入子文件夹`。
+也可以选中部分文献，使用 `DailyPaper → 将所选文献归入子文件夹`。
 
 ### 单篇操作
 
-- `DailyPaper: 评分选中文章`：为选中文章评分
-- `DailyPaper: 将所选文献归入子文件夹`：整理选中文献
-- `DailyPaper: 解读选中文章`：生成单篇中文解读
+- `DailyPaper → 评分选中文章`：为选中文章评分
+- `DailyPaper → 将所选文献归入子文件夹`：整理选中文献
+- `DailyPaper → 解读选中文章`：生成单篇中文解读
 
 ## 分类逻辑
 
