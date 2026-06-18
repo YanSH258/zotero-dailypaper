@@ -27,7 +27,7 @@
 3. 点击右上角齿轮按钮，选择 `Install Plugin From File...`
 4. 选择下载的 `.xpi` 文件并完成安装
 
-当前稳定版本为 [v1.3.0](https://github.com/YanSH258/zotero-dailypaper/releases/tag/v1.3.0)，支持 Zotero 9。
+当前稳定版本为 [v1.4.0](https://github.com/YanSH258/zotero-dailypaper/releases/tag/v1.4.0)，支持 Zotero 9。
 
 ## 初始配置
 
